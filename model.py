@@ -300,7 +300,7 @@ class TFLiteModel:
             t.data = data
 
     def get_output(self):
-        return self.tensors[self.graph.Outputs[0]]
+        return self.tensors[self.graph.Outputs(0)]
 
     def __iter__(self):
         return self
@@ -316,34 +316,6 @@ class TFLiteModel:
     def __repr__(self):
         return 'Version %s TFLite model (%s)' % (
             self.model.Version(), self.model_path)
-
-
-# TODO: Make work with new TFLiteModel implementation
-def step_through_model(model_path):
-    model = TFLiteModel(model_path, parse_data=False)
-
-    tensors = model.get_tensors()
-
-    input_layer = model.get_input()
-    output_layer = model.get_output()
-
-    print input_layer
-    try:
-        for idx, op in enumerate(model.get_operators()):
-            print 'Operator %s: %s (%s)' % (idx, op['type'], op)
-            inputs_idx = op['inputs']
-            print 'input tensors:'
-            for i in inputs_idx:
-                print 'Tensors_idx=%s: %s' % (i, tensors[i])
-            print ''
-            outputs_idx = op['outputs']
-            print 'output tensors:'
-            for i in outputs_idx:
-                print 'Tensors_idx=%s: %s' % (i, tensors[i])
-            print ''
-            _ = raw_input('...')
-    except KeyboardInterrupt:
-        pass
 
 
 if __name__ == '__main__':
@@ -368,3 +340,6 @@ if __name__ == '__main__':
             t = model.tensors[idx]
             # t.print_data = True
             print '',t
+
+        # uncomment to stop before each layer
+        # raw_input('...')
