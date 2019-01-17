@@ -5,8 +5,10 @@ float32 = np.float32
 int32 = np.int32
 uint8 = np.uint8
 
-# "Toy" interpreter that doesn't interpret anything. It's purpose is only to
-# illustrate how `data` travels through `model`
+
+# This "interpreter" is purely for illustrative purposes. It goes through the
+# entire model, passing the input to the output at each layer. It serves to
+# illustrate the flow of the input through the model.
 def run_interactive_no_eval(model_path, data):
     model = TFLiteModel(model_path, parse_data=False)
 
@@ -42,6 +44,7 @@ def run_interactive_no_eval(model_path, data):
 
     print model.get_output().data
 
+
 # def get_quantization_params(tensor, verbose=False):
 #     zero_point = uint8(tensor['zero_point'])
 #     scale = float32(tensor['scale'])
@@ -70,20 +73,26 @@ def run_interactive_no_eval(model_path, data):
 #         return None
 #     return weights, bias, data
 
+
 def conv2d(op, inputs, output):
     print 'Computing CONV2D'
+
 
 def depthwise_conv2d(op, inputs, output):
     print 'Computing Depthwise Conv2D'
 
+
 def add(op, inputs, output):
     print 'Computing Residual'
+
 
 def avgpool2d(op, inputs, output):
     print 'Computing Average Pool2D'
 
+
 def resize_bilinear(op, inputs, output):
     print 'Computing Resize Bilinear'
+
 
 def run(model, input_data):
     assert input_data is not None, 'Input data cannot be None'
@@ -94,6 +103,7 @@ def run(model, input_data):
         op_outputs = [model.tensors[idx] for idx in op.outputs]
 
         # assume all operations have one output only
+        assert len(op_outputs) == 1, 'Cannot handle more than 1 output'
         output_tensor = op_outputs[0]
 
         for op in model:
