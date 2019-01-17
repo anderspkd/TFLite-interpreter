@@ -1,14 +1,40 @@
-# Parse a .tflite file and return the content as a list of layers. I.e., if the
-# .tflite describes a network with the structure
+# Parse a .tflite file into some malleable representation (the classes defined
+# below). Some examples follow:
 #
-#  input -> FC -> FC -> output
+# Loading / reading a .tflite model
 #
-# then this script outputs a json compliant list of four elements where each
-# element corresponds to a layer in the network. A 'layer' in the output is
-# guaranteed to have, at least, the key 'type' which denotes its type (e.g., FC,
-# Conv2D, input).
+#  >>> model = TFLiteModel(path_to_model_file)
 #
-# We only care about models with 1 subgraph and which has 1 input and 1 output.
+# currently only mobile nets V2 models are supported. The model object can act
+# as an interator that returns the operators (i.e., layers) of the model in
+# order of evaluation. Usage would be something like
+#
+#  >>> model.set_input(some_numpy_array)
+#  >>> for operator in model:
+#          ...
+#
+# The type of the operator is denoted by `operator.opname`. Each operator also
+# contains lists with indices of its input and output tensors. For example:
+#
+#  >>> input_tensors = [model.tensors[i] for i in operator.inputs]
+#  >>> output_tensors = [model.tensors[i] for i in operator.outputs]
+#
+# Each tensor holds some data (as a numpy array) as well as quantization
+# information. E.g.,
+#
+#  >>> tensor.shape                     # shape of the data array
+#  >>> tensor.data                      # weights, bias, inputs and so on
+#  >>> tensor.zero_point; tensor.scale  # quantization information
+#
+# Extending the parser to support more nodes should be straightforward. It
+# essentially involves creating a subclass of `Operator` and defining the
+# `parse_options` method. See e.g., `Conv2DOperator`.
+#
+# While not currently implemented, it should also be straightforward to
+# implement serializing the model into whatever format you want. See for example
+# the code in the `if __main__ ...` branch at the bottom for an example of how
+# to go through the entire model in an orderly manner.
+
 
 import numpy as np
 from tflite.Model import Model
@@ -75,6 +101,9 @@ class Operator:
         # load options
         self.parse_options()
 
+    def get_supported_options(self):
+        return self._supported_options
+
     def parse_options(self):
         raise NotImplementedError('Cannot instantiate base operator class')
 
@@ -83,7 +112,7 @@ class Operator:
 
     def __repr__(self):
         s = '%s (name=%s)\n' % (self.opname, self.name)
-        for opt in self._supported_options:
+        for opt in self.get_supported_options():
             s += ' Option: %s=%s\n' % (opt, getattr(self, opt))
         return s
 
@@ -134,6 +163,7 @@ class DepthwiseConv2DOperator(Conv2DOperator):
         self._supported_options = ['stride', 'padding', 'depth_multiplier']
 
 
+# provides a convenient mapping between operator names and the operator classes.
 operator_map = {
     'ADD': AddOperator,
     'AVERAGE_POOL_2D': AveragePool2DOperator,
@@ -163,12 +193,11 @@ class Tensor:
     # types.
     data_types = [None, None, 'INT32', 'UINT8']
 
-    # It doesn't make sense to instantiate Tensor objects not in the context of
-    # a specific flatbuffer model object. Basically, if this is not set to a
-    # proper `model.Buffers` function, then we cannot create Tensor objects
-    # (because we cannot load the data of the tensors). For testing purposes, it
-    # is possible to load a tensor without loading the data, in which case this
-    # function is not used.
+    # In order to load the data that a particular tensor points to, we need
+    # access to the `model.Buffers` function. In general it doesn't make much
+    # sense (for the parser) to define tensors outside the context of a specific
+    # model. If `parse_data == False`, then no data is parsed and then
+    # `model_buffers` is not used (or needed).
     model_buffers = None
 
     def __init__(self, flatbuf_tensor, parse_data=True):
@@ -205,7 +234,8 @@ class Tensor:
         self.scale = scale
 
     def _cast(self, data, new_data_typ):
-        # currently only support new_data_typ == 'INT32'
+        # Currently only support casting a uint8 numpy array to a int32 numpy
+        # array.
         bytelen = None
         np_typ = None
         if new_data_typ == 'INT32':
@@ -218,6 +248,7 @@ class Tensor:
         if len(data) % bytelen:
             raise ValueError('data not a multiple of type size')
 
+        # assume little endian
         data1 = list()
         i = 0
         while i < len(data):
@@ -231,6 +262,7 @@ class Tensor:
 
 
     def _load_data(self):
+        # load data for this tensor. Only called if `parse_data == True`
         data_idx = self._flatbuf_tensor.Buffer()
         data_typ = self.data_types[self._flatbuf_tensor.Type()]
         if data_typ is None:
@@ -244,6 +276,8 @@ class Tensor:
             self.data = data
         else:
             if data_typ != 'UINT8':
+                # convert data into `data_typ`. Note that this also sets
+                # `self.data_type` to `data_typ`.
                 data = self._cast(data, data_typ)
             try:
                 data = data.reshape(self.shape)
@@ -255,13 +289,20 @@ class Tensor:
 class TFLiteModel:
 
     def __init__(self, model_path, parse_data=True):
+        # read and parse model from the tflite file at `model_path`
         self.model_path = model_path
         self.model = load_model(model_path)
+        # we assume that there's only one subgraph in our model
         self.graph = self.model.Subgraphs(0)
         self.opcodes = load_opcodes(self.model)
 
+        # set `valid_opcodes` on the `Operator` class to ensure that we can
+        # extract the correct operator names.
         Operator.valid_opcodes = self.opcodes
         if parse_data:
+            # if we also want to parse the tensors' data (the default), then we
+            # need to provide the Tensor class with the `Buffers` function of
+            # our flatbuffer model.
             Tensor.model_buffers = self.model.Buffers
 
         self.operators = []
@@ -284,6 +325,7 @@ class TFLiteModel:
             self.tensors.append(Tensor(fb_tensor, parse_data=parse_data))
 
     def get_input(self):
+        # assume only one input
         return self.tensors[self.graph.Inputs(0)]
 
     def set_input(self, data, reshape=True):
@@ -300,7 +342,12 @@ class TFLiteModel:
             t.data = data
 
     def get_output(self):
+        # assume only one output
         return self.tensors[self.graph.Outputs(0)]
+
+    def reset(self):
+        # this just resets the iterator
+        self._current_iter_idx = 0
 
     def __iter__(self):
         return self
@@ -319,13 +366,10 @@ class TFLiteModel:
 
 
 if __name__ == '__main__':
-
     from sys import argv
-
     if len(argv) < 2:
         print 'Usage: %s [model_path]' % (argv[0],)
         exit(0)
-
     model = TFLiteModel(argv[1])
     for op in model:
         print '---------------------------'
