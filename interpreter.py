@@ -1,5 +1,9 @@
 import numpy as np
 
+float32 = np.float32
+int32 = np.int32
+uint8 = np.uint8
+
 # "Toy" interpreter that doesn't interpret anything. The purpose is to
 # illustrate how `data' is passed through the graph.
 def run_interactive_no_eval(model, data):
@@ -36,6 +40,12 @@ def run_interactive_no_eval(model, data):
         print '\n--------- ... ------------\n'
         raw_input()
 
+def get_quantization_params(tensor, verbose=False):
+    zero_point = uint8(tensor['zero_point'])
+    scale = float32(tensor['scale'])
+    if verbose:
+        print 'Quantization Params for %s: Z=%s, S=%s' % (tensor['type'], zero_point, scale)
+    return zero_point, scale
 
 def split_conv2d_inputs(inputs):
     assert len(inputs) == 3, "Did not get three (weights, bias, input) inputs for Conv2d"
@@ -58,57 +68,46 @@ def split_conv2d_inputs(inputs):
         return None
     return weights, bias, data
 
-def conv2d(op, inputs):
-    params = split_conv2d_inputs(inputs)
-    if params is None:
-        print 'Could not compute %s' % (op,)
-        return
-    weights, bias, data = params
-
+def conv2d(op, inputs, output):
     print 'Computing CONV2D'
 
-def depthwise_conv2d(op, inputs):
-    params = split_conv2d_inputs(inputs)
-    if params is None:
-        print 'Could not compute %s' % (op,)
-        return
-    weights, bias, data = params
-
+def depthwise_conv2d(op, inputs, output):
     print 'Computing Depthwise Conv2D'
 
-def add(op, inputs):
+def add(op, inputs, output):
     print 'Computing Residual'
 
-def avgpool2d(op, inputs):
+def avgpool2d(op, inputs, output):
     print 'Computing Average Pool2D'
 
-def resize_bilinear(op, inputs):
+def resize_bilinear(op, inputs, output):
     print 'Computing Resize Bilinear'
 
 def run(model, input_data):
-
     assert input_data is not None, 'Input data cannot be None'
-
-    tensors = model.get_tensors()
-    operators = model.get_operators()
     model.set_input(input_data)
 
-    print 'Setting input'
+    for op in model:
+        op_inputs = [model.tensors[idx] for idx in op.inputs]
+        op_outputs = [model.tensors[idx] for idx in op.outputs]
 
-    for op_idx, op in model:
-        inputs = [tensors[i] for i in op['inputs']]
+        # assume all operations have one output only
+        output_tensor = op_outputs[0]
 
-        if op['type'] == 'CONV_2D':
-            output = conv2d(op, inputs)
-        elif op['type'] == 'DEPTHWISE_CONV_2D':
-            output = depthwise_conv2d(op, inputs)
-        elif op['type'] == 'ADD':
-            output = add(op, inputs)
-        elif op['type'] == 'AVERAGE_POOL_2D':
-            output = avgpool2d(op, inputs)
-        elif op['type'] == 'RESIZE_BILINEAR':
-            output = resize_bilinear(op, inputs)
-        else:
-            print 'unknown operator type: %s' % (op['type'],)
+        for op in model:
+            opname = op.opname
+            if 'CONV_2D' == opname:
+                output = conv2d(op, op_inputs, output_tensor)
+            elif 'DEPTHWISE_CONV_2D' == opname:
+                output = depthwise_conv2d(op, op_inputs, output_tensor)
+            elif 'ADD' == opname:
+                output = add(op, op_inputs, output_tensor)
+            elif 'AVERAGE_POOL_2D' == opname:
+                output = avgpool2d(op, op_inputs, output_tensor)
+            elif 'RESIZE_BILINEAR' == opname:
+                output = resize_bilinear(op, op_inputs, output_tensor)
+            else:
+                print 'Unknown operator: %s' % (opname,)
+                return
 
     print 'Done. Prepping output'

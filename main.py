@@ -12,7 +12,7 @@ if len(argv) < 3:
 
 model = TFLiteModel(argv[1])
 
-input_shape = model.get_input()['shape']
+input_shape = model.get_input().shape
 img_shape = input_shape[1:-1]
 img = Image.open(argv[2])
 img = img.resize(img_shape, Image.ANTIALIAS)
