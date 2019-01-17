@@ -1,11 +1,6 @@
 import numpy as np
 from model import TFLiteModel
 
-float32 = np.float32
-int32 = np.int32
-uint8 = np.uint8
-
-
 # This "interpreter" is purely for illustrative purposes. It goes through the
 # entire model, passing the input to the output at each layer. It serves to
 # illustrate the flow of the input through the model.
@@ -45,33 +40,44 @@ def run_interactive_no_eval(model_path, data):
     print model.get_output().data
 
 
-# def get_quantization_params(tensor, verbose=False):
-#     zero_point = uint8(tensor['zero_point'])
-#     scale = float32(tensor['scale'])
-#     if verbose:
-#         print 'Quantization Params for %s: Z=%s, S=%s' % (tensor['type'], zero_point, scale)
-#     return zero_point, scale
+# this is sorta hacky. But I'm not sure how else to determine where a specific
+# tensor is used.
+def is_bias_tensor(tensor):
+    n = tensor.name
+    return ('Conv2D_Fold_bias' in n or
+            'Conv2D_bias' in n or
+            'depthwise_Fold_bias' in n)
 
-# def split_conv2d_inputs(inputs):
-#     assert len(inputs) == 3, "Did not get three (weights, bias, input) inputs for Conv2d"
-#     bias = None
-#     weights = None
-#     data = None
-#     for i in range(len(inputs)):
-#         tensor = inputs[i]
-#         if ('Conv2D_Fold_bias' in tensor['type'] or
-#             'Conv2D_bias' in tensor['type'] or
-#             'depthwise_Fold_bias' in tensor['type']):
-#             bias = tensor
-#         elif 'weights_quant' in tensor['type']:
-#             weights = tensor
-#         else:
-#             data = tensor
-#     if weights is None or bias is None or data is None:
-#         print 'Could not extract approriate inputs for operator'
-#         print 'weights=%s, bias=%s, data=%s' % (weights, bias, data)
-#         return None
-#     return weights, bias, data
+
+def is_weights_tensor(tensor):
+    n = tensor.name
+    return 'weights_quant' in n
+
+
+def split_conv2d_inputs(inputs):
+    assert len(inputs) == 3
+    bias = None
+    weights = None
+    data = None
+    for i in range(3):
+        tensor = inputs[i]
+        if is_bias_tensor(tensor):
+            bias = tensor
+            continue
+        if is_weights_tensor(tensor):
+            weights = tensor
+            continue
+        data = tensor
+    # make sure we fail if we could not find suitable data
+    assert data is not None
+    assert weights is not None
+    assert bias is not None
+    return weights, bias, data
+
+
+float32 = np.float32
+int32 = np.int32
+uint8 = np.uint8
 
 
 def conv2d(op, inputs, output):
