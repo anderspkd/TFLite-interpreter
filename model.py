@@ -26,6 +26,12 @@
 #  >>> tensor.data                      # weights, bias, inputs and so on
 #  >>> tensor.zero_point; tensor.scale  # quantization information
 #
+# Note: the tensor object currently does not distinguish about what the tensor
+# is used for (input, output, weights, bias and whatever else). This can be
+# determined from `tensor.name`. For example, a bias tensor is usually might
+# have "Conv2D_Fold_bias" or "depthwise_Fold_bias" in its name. This is really
+# the only way to determine what the tensor is used for as far as I can tell.
+#
 # Extending the parser to support more nodes should be straightforward. It
 # essentially involves creating a subclass of `Operator` and defining the
 # `parse_options` method. See e.g., `Conv2DOperator`.
