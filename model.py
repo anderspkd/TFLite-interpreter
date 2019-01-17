@@ -153,8 +153,9 @@ class Conv2DOperator(Operator):
         o.Init(options.Bytes, options.Pos)
         self.stride = (o.StrideH(), o.StrideW())
         self.padding = self.padding_schemes[o.Padding()]
+        self.dilation_factor = (o.DilationHFactor(), o.DilationWFactor())
         self._flatbuf_options_obj = options
-        self._supported_options = ['stride', 'padding']
+        self._supported_options = ['stride', 'padding', 'dilation_factor']
 
 
 class DepthwiseConv2DOperator(Conv2DOperator):
@@ -165,8 +166,10 @@ class DepthwiseConv2DOperator(Conv2DOperator):
         self.stride = (o.StrideH(), o.StrideW())
         self.padding = self.padding_schemes[o.Padding()]
         self.depth_multiplier = o.DepthMultiplier()
+        self.dilation_factor = (o.DilationHFactor(), o.DilationWFactor())
         self._flatbuf_options_obj = options
-        self._supported_options = ['stride', 'padding', 'depth_multiplier']
+        self._supported_options = [
+            'stride', 'padding', 'depth_multiplier', 'dilation_factor']
 
 
 # provides a convenient mapping between operator names and the operator classes.
