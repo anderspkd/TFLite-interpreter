@@ -118,6 +118,7 @@ class Operator:
 
     def __repr__(self):
         s = '%s (name=%s)\n' % (self.opname, self.name)
+        s += 'inputs=%s, outputs=%s\n' % (self.inputs, self.outputs)
         for opt in self.get_supported_options():
             s += ' Option: %s=%s\n' % (opt, getattr(self, opt))
         return s
@@ -209,7 +210,7 @@ class Tensor:
     # `model_buffers` is not used (or needed).
     model_buffers = None
 
-    def __init__(self, flatbuf_tensor, parse_data=True):
+    def __init__(self, flatbuf_tensor, parse_data=True, reshape=True):
         self._flatbuf_tensor = flatbuf_tensor
         self.name = flatbuf_tensor.Name()
         self.shape = tuple(flatbuf_tensor.ShapeAsNumpy())
@@ -222,7 +223,7 @@ class Tensor:
         self.print_data = False
         self._set_quantization_params()
         if parse_data:
-            self._load_data()
+            self._load_data(reshape)
 
     def __repr__(self):
         d = self.data if self.print_data else type(self.data)
@@ -270,7 +271,7 @@ class Tensor:
         return np.asarray(data1, dtype=np_typ)
 
 
-    def _load_data(self):
+    def _load_data(self, reshape):
         # load data for this tensor. Only called if `parse_data == True`
         data_idx = self._flatbuf_tensor.Buffer()
         data_typ = self.data_types[self._flatbuf_tensor.Type()]
@@ -289,7 +290,8 @@ class Tensor:
                 # `self.data_type` to `data_typ`.
                 data = self._cast(data, data_typ)
             try:
-                data = data.reshape(self.shape)
+                if reshape:
+                    data = data.reshape(self.shape)
             except:
                 print 'Could not reshape %s to %s' % (self.name, self.shape)
             self.data = data
@@ -297,7 +299,7 @@ class Tensor:
 
 class TFLiteModel:
 
-    def __init__(self, model_path, parse_data=True):
+    def __init__(self, model_path, parse_data=True, reshape_tensors=False):
         # read and parse model from the tflite file at `model_path`
         self.model_path = model_path
         self.model = load_model(model_path)
@@ -317,9 +319,9 @@ class TFLiteModel:
         self.operators = []
         self.tensors = []
         self._current_iter_idx = 0
-        self._load(parse_data)
+        self._load(parse_data, reshape_tensors)
 
-    def _load(self, parse_data):
+    def _load(self, parse_data, reshape_tensors):
         # load operators
         num_ops = self.graph.OperatorsLength()
         for i in range(num_ops):
@@ -331,7 +333,8 @@ class TFLiteModel:
         num_tensors = self.graph.TensorsLength()
         for i in range(num_tensors):
             fb_tensor = self.graph.Tensors(i)
-            self.tensors.append(Tensor(fb_tensor, parse_data=parse_data))
+            self.tensors.append(Tensor(fb_tensor, parse_data=parse_data,
+                                       reshape=reshape_tensors))
 
     def get_input(self):
         # assume only one input
@@ -379,7 +382,7 @@ if __name__ == '__main__':
     if len(argv) < 2:
         print 'Usage: %s [model_path]' % (argv[0],)
         exit(0)
-    model = TFLiteModel(argv[1])
+    model = TFLiteModel(argv[1], reshape_tensors=True)
     for op in model:
         print '---------------------------'
         print op
@@ -395,4 +398,4 @@ if __name__ == '__main__':
             print '',t
 
         # uncomment to stop before each layer
-        # raw_input('...')
+        raw_input('...')
