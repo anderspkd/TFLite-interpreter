@@ -37,6 +37,7 @@ def run_interactive_no_eval(model_path, data):
             else:
                 model.tensors[idx].data = data1
 
+        raw_input()
     print model.get_output().data
 
 
@@ -81,7 +82,62 @@ uint8 = np.uint8
 
 
 def conv2d(op, inputs, output):
-    print 'Computing CONV2D'
+    # The implementation here follows the one in reference_ops.h. See
+    # /tensorflow/lite/kernels/internal/reference/reference_ops.h#L321
+    weights, bias, data = split_conv2d_inputs(inputs)
+
+    # data shape. Output is assumed to have the same shape
+    #  [batch, height, width, channels]
+    # weights shape
+    #  [filter_height, filter_width, in_channels, out_channels]
+    # bias is a vector with filter_height entries
+
+    print 'Computing Conv2D'
+
+    batches, input_height, input_width, input_channels = data.shape
+    filter_height, filter_width, _, output_channels = weights.shape
+    _, output_height, output_width, _ = output.shape
+    stride_h, strid_w = op.stride
+    dilation_h, dilation_w = op.dilation_factor
+
+    # filter_offset is weight quantization
+    # input_offset is likewise input quantization
+    # ouput_offset, ditto
+
+    # Offset(...) is defined at
+    # lite/kernels/internal/types.h:372
+
+    # Flatten input_data first? That would make it closer to the functions in
+    # reference_ops.h. It might also make it easier to work with...
+
+    # can probably make an assumption about the number of batches in the
+    # input. In particular that there's only ever going to be one.
+
+    # lmao this is slow as fuck
+    for b in range(batches):
+        for out_y in range(output_height):
+            for out_x in range(output_width):
+                for out_c in range(output_channels):
+                    # TODO: figure out padding
+                    in_x_origin = (out_x * stride_w)
+                    in_y_origin = (out_y * stride_h)
+                    int32_acc = int32(0)
+                    for filter_y in range(filter_height):
+                        for filter_x in range(filter_width):
+                            for in_c in range(input_channels):
+                                in_y_origin + dilation_h * filter_y
+                                if (0 <= in_x < input_w) and (0 <= in_y < input_h):
+                                    pass
+                            # end in_c
+                        # end filter_x
+                    # end filter_Y
+
+                    # add bias here, perform quantization adjustment and save
+                    # output.
+                # end out_c
+            # end out_x
+        # end out_y
+    # end b
 
 
 def depthwise_conv2d(op, inputs, output):
@@ -112,20 +168,19 @@ def run(model, input_data):
         assert len(op_outputs) == 1, 'Cannot handle more than 1 output'
         output_tensor = op_outputs[0]
 
-        for op in model:
-            opname = op.opname
-            if 'CONV_2D' == opname:
-                output = conv2d(op, op_inputs, output_tensor)
-            elif 'DEPTHWISE_CONV_2D' == opname:
-                output = depthwise_conv2d(op, op_inputs, output_tensor)
-            elif 'ADD' == opname:
-                output = add(op, op_inputs, output_tensor)
-            elif 'AVERAGE_POOL_2D' == opname:
-                output = avgpool2d(op, op_inputs, output_tensor)
-            elif 'RESIZE_BILINEAR' == opname:
-                output = resize_bilinear(op, op_inputs, output_tensor)
-            else:
-                print 'Unknown operator: %s' % (opname,)
-                return
+        opname = op.opname
+        if 'CONV_2D' == opname:
+            output = conv2d(op, op_inputs, output_tensor)
+        elif 'DEPTHWISE_CONV_2D' == opname:
+            output = depthwise_conv2d(op, op_inputs, output_tensor)
+        elif 'ADD' == opname:
+            output = add(op, op_inputs, output_tensor)
+        elif 'AVERAGE_POOL_2D' == opname:
+            output = avgpool2d(op, op_inputs, output_tensor)
+        elif 'RESIZE_BILINEAR' == opname:
+            output = resize_bilinear(op, op_inputs, output_tensor)
+        else:
+            print 'Unknown operator: %s' % (opname,)
+            return
 
     print 'Done. Prepping output'
