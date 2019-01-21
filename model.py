@@ -225,6 +225,11 @@ class Tensor:
         if parse_data:
             self._load_data(reshape)
 
+    def get_flat_shape(self):
+        # if reshape == true, then we will need to know the shape of the
+        # flattened tensor which is just Prod(self.shape)
+        return np.prod(self.shape)
+
     def __repr__(self):
         d = self.data if self.print_data else type(self.data)
         return '%s: quant=(Z=%s, S=%s), shape=%s, data_type=%s, data=%s' % (
@@ -233,6 +238,8 @@ class Tensor:
         )
 
     def __getitem__(self, idx):
+        if type(self.data) not in (list, np.ndarray):
+            raise ValueError('called __getitem__ on %s' % (self, ))
         return self.data[idx]
 
     def _set_quantization_params(self):

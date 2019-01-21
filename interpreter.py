@@ -42,11 +42,34 @@ def run_interactive_no_eval(model_path, data):
     print model.get_output().data
 
 
+def print_layer_info(fop):
+    def f(op, inputs, outputs):
+        print op
+        print 'Input tensors:'
+        if type(inputs) == list:
+            for i in inputs:
+                print '', i
+        else:
+            print '', inputs
+        x = fop(op, inputs, outputs)
+        print '\nOutput Tensors'
+        if type(outputs) == list:
+            for o in outputs:
+                print '', o
+        else:
+            print '',outputs
+        print '----------------------------------'
+        return x
+    return f
+
+
 def determine_padding_dims(padding, filter_shape, input_shape):
     # compute height and width needed for padding according to `padding` (either
     # SAME or VALID), where `input_shape` is the shape of the input and
     # `filter_shape` is the shape of the kernel.
-    pass
+
+    # TODO: not correct
+    return 0, 0
 
 
 # this is sorta hacky. But I'm not sure how else to determine where a specific
@@ -93,6 +116,7 @@ int32 = np.int32
 uint8 = np.uint8
 
 
+@print_layer_info
 def conv2d(op, inputs, output):
     # The implementation here follows the one in reference_ops.h. See
     # /tensorflow/lite/kernels/internal/reference/reference_ops.h#L321
@@ -152,7 +176,7 @@ def conv2d(op, inputs, output):
         # end out_y
     # end b
 
-
+@print_layer_info
 def depthwise_conv2d(op, inputs, output):
 
     weights, bias, input_data = split_conv2d_inputs(inputs)
@@ -170,6 +194,10 @@ def depthwise_conv2d(op, inputs, output):
     input_z = input_data.zero_point
     output_s = output.scale
     output_z = output.zero_point
+
+    # allocate space for output
+    output.data = np.zeros(
+        output.get_flat_shape(), dtype=output.data_type.lower())
 
     # padding is a function of the shape of the input and outptu
     pad_h, pad_w = determine_padding_dims(
@@ -215,6 +243,17 @@ def depthwise_conv2d(op, inputs, output):
                         # through all the hoops that gemmlowp also does.
                         acc = quantized_multiplier_mult(acc, qm, n)
 
+                        # add the output offset
+                        acc += output_z
+
+                        # clamp the result
+                        acc = 255 if acc >= 255 else acc
+                        acc = 0 if acc < 0 else acc
+
+                        # save the output
+                        output[offset(
+                            output.shape, b, out_y, out_x, oc
+                        )] = uint8(acc)
                     # end m
                 # end ic
             # end out_x
@@ -244,17 +283,21 @@ def run(model, input_data):
         op_inputs = [model.tensors[idx] for idx in op.inputs]
         op_outputs = [model.tensors[idx] for idx in op.outputs]
 
+        # assume only one output in each operation
+        assert len(op_outputs) == 1
+        output_tensor = op_outputs[0]
+
         opname = op.opname
         if 'CONV_2D' == opname:
-            conv2d(op, op_inputs, op_outputs)
+            conv2d(op, op_inputs, output_tensor)
         elif 'DEPTHWISE_CONV_2D' == opname:
-            depthwise_conv2d(op, op_inputs, op_outputs)
+            depthwise_conv2d(op, op_inputs, output_tensor)
         elif 'ADD' == opname:
-            add(op, op_inputs, op_outputs)
+            add(op, op_inputs, output_tensor)
         elif 'AVERAGE_POOL_2D' == opname:
-            avgpool2d(op, op_inputs, op_outputs)
+            avgpool2d(op, op_inputs, output_tensor)
         elif 'RESIZE_BILINEAR' == opname:
-            resize_bilinear(op, op_inputs, op_outputs)
+            resize_bilinear(op, op_inputs, output_tensor)
         else:
             print 'Unknown operator: %s' % (opname,)
             return
