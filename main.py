@@ -13,7 +13,7 @@ if len(argv) < 3:
 # Create a model from a file and load an image from a file. Then we run the
 # interpreter.
 
-model = TFLiteModel(argv[1], parse_data=False)
+model = TFLiteModel(argv[1], parse_data=True)
 input_shape = model.get_input().shape
 img_shape = input_shape[1:-1]
 img = Image.open(argv[2])
