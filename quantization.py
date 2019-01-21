@@ -1,7 +1,10 @@
 import numpy as np
 
-# handlers and helpers for quantization stuff
+int32 = np.int32
+int64 = np.int64
 
+
+# handlers and helpers for quantization stuff
 def compute_multiplier(s1, s2, s3):
     # given three FP32 values (corresponding to three quantization scale
     # values), compute and return integers n and qm, so that
@@ -17,15 +20,12 @@ def compute_multiplier(s1, s2, s3):
         n += 1
 
     sh = 1 << 31
-    qm = real_multiplier * sh
+    qm = int64((real_multiplier * sh) + .5)
     if qm == sh:
         qm /= 2
         n -= 1
 
     return n, qm
-
-int32 = np.int32
-int64 = np.int64
 
 INT32_MIN = int32(1 << 31)
 INT32_MAX = int32(INT32_MIN - 1)
