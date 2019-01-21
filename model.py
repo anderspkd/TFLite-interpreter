@@ -391,6 +391,14 @@ class TFLiteModel:
         return 'Version %s TFLite model (%s)' % (
             self.model.Version(), self.model_path)
 
+    def get_inputs_for_op(self, op):
+        for idx in op.inputs:
+            yield self.tensors[idx]
+
+    def get_outputs_for_op(self, op):
+        for idx in op.inputs:
+            yield self.tensors[idx]
+
 
 if __name__ == '__main__':
     from sys import argv
