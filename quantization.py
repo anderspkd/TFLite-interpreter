@@ -1,8 +1,11 @@
 import numpy as np
-import Decimals
+# import Decimals
 
 int32 = np.int32
 int64 = np.int64
+
+INT32_MIN = int32(1 << 31)
+INT32_MAX = int32(INT32_MIN - 1)
 
 
 # handlers and helpers for quantization stuff
@@ -14,7 +17,7 @@ def compute_multiplier(s1, s2, s3):
     #
     # qm fits in a int32
 
-    real_multiplier = (s1*s2)/s3
+    real_multiplier = (float(s1)*s2)/s3
 
     assert 0.0 < real_multiplier < 1.0, \
         'real_multiplier=%s (s1=%s, s2=%s, s3=%s)' % (
@@ -32,10 +35,10 @@ def compute_multiplier(s1, s2, s3):
         qm /= 2
         n -= 1
 
-    return n, int32(qm)
+    assert qm <= INT32_MAX
+    assert n >= 0
 
-INT32_MIN = int32(1 << 31)
-INT32_MAX = int32(INT32_MIN - 1)
+    return n, int32(qm)
 
 # TODO: Figure out a way to test this guy
 def quantized_multiplier_mult(x, multiplier, shift):
