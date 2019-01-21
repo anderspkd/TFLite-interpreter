@@ -1,4 +1,5 @@
 import numpy as np
+import Decimals
 
 int32 = np.int32
 int64 = np.int64
@@ -13,19 +14,25 @@ def compute_multiplier(s1, s2, s3):
     #
     # qm fits in a int32
 
-    real_multiplier = float(s1*s2)/s3
+    real_multiplier = (s1*s2)/s3
+
+    assert 0.0 < real_multiplier < 1.0, \
+        'real_multiplier=%s (s1=%s, s2=%s, s3=%s)' % (
+            real_multiplier, s1, s2, s3)
+
     n = 0
     while (real_multiplier < 0.5):
         real_multiplier *= 2.0;
         n += 1
 
     sh = 1 << 31
-    qm = int64((real_multiplier * sh) + .5)
+    qm = int64(np.round(real_multiplier * sh))
+
     if qm == sh:
         qm /= 2
         n -= 1
 
-    return n, qm
+    return n, int32(qm)
 
 INT32_MIN = int32(1 << 31)
 INT32_MAX = int32(INT32_MIN - 1)
