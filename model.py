@@ -396,7 +396,7 @@ class TFLiteModel:
             yield self.tensors[idx]
 
     def get_outputs_for_op(self, op):
-        for idx in op.inputs:
+        for idx in op.outputs:
             yield self.tensors[idx]
 
 
