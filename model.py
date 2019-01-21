@@ -232,6 +232,9 @@ class Tensor:
             self.data_type, d
         )
 
+    def __getitem__(self, idx):
+        return self.data[idx]
+
     def _set_quantization_params(self):
         quantization = self._flatbuf_tensor.Quantization()
         zero_point = quantization.ZeroPointAsNumpy()
@@ -357,8 +360,7 @@ class TFLiteModel:
         # assume only one output
         return self.tensors[self.graph.Outputs(0)]
 
-    def reset(self):
-        # this just resets the iterator
+    def _reset(self):
         self._current_iter_idx = 0
 
     def __iter__(self):
@@ -366,6 +368,7 @@ class TFLiteModel:
 
     def next(self):
         if self._current_iter_idx >= len(self.operators):
+            self._reset()
             raise StopIteration
         else:
             idx = self._current_iter_idx
