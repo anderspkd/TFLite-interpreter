@@ -214,6 +214,9 @@ class Tensor:
         self._flatbuf_tensor = flatbuf_tensor
         self.name = flatbuf_tensor.Name()
         self.shape = tuple(flatbuf_tensor.ShapeAsNumpy())
+        # depending on whether or not we actually reshape the contents of the
+        # tensor, the associated shape might not be correct.
+        self.actual_shape = self.shape if reshape else np.prod(self.shape)
         self.zero_point = None
         self.scale = None
         self.data_type = None
@@ -225,22 +228,24 @@ class Tensor:
         if parse_data:
             self._load_data(reshape)
 
-    def get_flat_shape(self):
-        # if reshape == true, then we will need to know the shape of the
-        # flattened tensor which is just Prod(self.shape)
-        return np.prod(self.shape)
-
     def __repr__(self):
         d = self.data if self.print_data else type(self.data)
-        return '%s: quant=(Z=%s, S=%s), shape=%s, data_type=%s, data=%s' % (
+        return '%s: quant=(Z=%s, S=%s), shape=%s (%s), data_type=%s, data=%s' % (
             self.name, self.zero_point, self.scale, self.shape,
-            self.data_type, d
+            self.actual_shape, self.data_type, d
         )
 
     def __getitem__(self, idx):
-        if type(self.data) not in (list, np.ndarray):
-            raise ValueError('called __getitem__ on %s' % (self, ))
-        return self.data[idx]
+        try:
+            return self.data[idx]
+        except Exception as e:
+            raise ValueError('__getitem__(%s[%s]):%s' % (self, idx, e))
+
+    def __setitem__(self, idx, v):
+        try:
+            self.data[idx] = v
+        except Exception as e:
+            raise ValueError('__setitem__(%s[%s]=%s):%s' % (self, idx, v, e))
 
     def _set_quantization_params(self):
         quantization = self._flatbuf_tensor.Quantization()
@@ -293,7 +298,7 @@ class Tensor:
         self.data_type = data_typ
         if type(data) != np.ndarray:
             # probably a scalar
-            self.data = data
+            self.data = np.ndarray([data], dtype=data_typ.lower())
         else:
             if data_typ != 'UINT8':
                 # convert data into `data_typ`. Note that this also sets
@@ -347,10 +352,10 @@ class TFLiteModel:
                                        reshape=reshape_tensors))
 
     def get_input(self):
-        # assume only one input
         return self.tensors[self.graph.Inputs(0)]
 
     def set_input(self, data, reshape=True):
+        # TODO: might need to flatten input.
         t = self.get_input()
         if reshape:
             try:
@@ -392,7 +397,7 @@ if __name__ == '__main__':
     if len(argv) < 2:
         print 'Usage: %s [model_path]' % (argv[0],)
         exit(0)
-    model = TFLiteModel(argv[1], reshape_tensors=True)
+    model = TFLiteModel(argv[1])
     for op in model:
         print '---------------------------'
         print op
