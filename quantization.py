@@ -38,6 +38,7 @@ def compute_multiplier(s1, s2, s3):
 
 
 def quantized_multiplier_mult(x, multiplier, shift, exact_rounding=False):
+    # returns (x*m)*2^{shift}
 
     lshift, rshift = (shift, 0) if shift > 0 else (0, -shift)
     # 1. saturate mult between `x * (1 << lshift)` and `multiplier`
