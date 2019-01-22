@@ -50,6 +50,7 @@ from tflite.BuiltinOperator import BuiltinOperator
 from tflite.Conv2DOptions import Conv2DOptions
 from tflite.DepthwiseConv2DOptions import DepthwiseConv2DOptions
 from tflite.ResizeBilinearOptions import ResizeBilinearOptions
+from tflite.Pool2DOptions import Pool2DOptions
 
 
 def load_model(model_path):
@@ -78,6 +79,11 @@ class InvalidOperator(Exception):
 
 
 class Operator:
+
+    # values for options that are used by multiple different layers.
+    padding_schemes = ['SAME', 'VALID']
+    activation_types = [
+        None, 'RELU', 'RELU_N1_TO_1', 'RELU6', 'TANH', 'SIGN_BIT']
 
     # Supported keys:
     #
@@ -131,7 +137,17 @@ class AddOperator(Operator):
 
 class AveragePool2DOperator(Operator):
     def parse_options(self):
-        pass
+        options = self._flatbuf_op.BuiltinOptions()
+        o = Pool2DOptions()
+        o.Init(options.Bytes, options.Pos)
+        self.padding = self.padding_schemes[o.Padding()]
+        self.stride = (o.StrideH(), o.StrideW())
+        self.filter_size = (o.FilterWidth(), o.FilterHeight())
+        self.fused_activation_function = self.activation_types[
+            o.FusedActivationFunction()]
+        self._flatbuf_options_obj = options
+        self._supported_options = [
+            'padding', 'stride', 'filter_size', 'fused_activation_function']
 
 
 class ResizeBilinearOperator(Operator):
@@ -145,9 +161,6 @@ class ResizeBilinearOperator(Operator):
 
 
 class Conv2DOperator(Operator):
-
-    padding_schemes = ['SAME', 'VALID']
-
     def parse_options(self):
         options = self._flatbuf_op.BuiltinOptions()
         o = Conv2DOptions()
@@ -155,11 +168,15 @@ class Conv2DOperator(Operator):
         self.stride = (o.StrideH(), o.StrideW())
         self.padding = self.padding_schemes[o.Padding()]
         self.dilation_factor = (o.DilationHFactor(), o.DilationWFactor())
+        self.fused_activation_function = self.activation_types[
+            o.FusedActivationFunction()]
         self._flatbuf_options_obj = options
-        self._supported_options = ['stride', 'padding', 'dilation_factor']
+        self._supported_options = [
+            'stride', 'padding', 'dilation_factor',
+            'fused_activation_function']
 
 
-class DepthwiseConv2DOperator(Conv2DOperator):
+class DepthwiseConv2DOperator(Operator):
     def parse_options(self):
         options = self._flatbuf_op.BuiltinOptions()
         o = DepthwiseConv2DOptions()
@@ -168,9 +185,12 @@ class DepthwiseConv2DOperator(Conv2DOperator):
         self.padding = self.padding_schemes[o.Padding()]
         self.depth_multiplier = o.DepthMultiplier()
         self.dilation_factor = (o.DilationHFactor(), o.DilationWFactor())
+        self.fused_activation_function = self.activation_types[
+            o.FusedActivationFunction()]
         self._flatbuf_options_obj = options
         self._supported_options = [
-            'stride', 'padding', 'depth_multiplier', 'dilation_factor']
+            'stride', 'padding', 'depth_multiplier', 'dilation_factor',
+            'fused_activation_function']
 
 
 # provides a convenient mapping between operator names and the operator classes.
@@ -421,4 +441,4 @@ if __name__ == '__main__':
             print '',t
 
         # uncomment to stop before each layer
-        raw_input('...')
+        # raw_input('...')
