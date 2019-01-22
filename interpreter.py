@@ -87,8 +87,11 @@ def determine_padding_dims(padding, filter_shape, input_shape):
     # SAME or VALID), where `input_shape` is the shape of the input and
     # `filter_shape` is the shape of the kernel.
 
-    # TODO: not correct
-    return 0, 0
+    if padding == 'VALID':
+        return 0, 0
+
+    # SAME padding means we add 0's around the edges, with extra padding on the
+    # right and bottom, in case the padding ends up being odd.
 
 
 # this is sorta hacky. But I'm not sure how else to determine where a specific
