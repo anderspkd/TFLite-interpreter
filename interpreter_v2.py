@@ -5,6 +5,11 @@ import quantization
 import sys
 from PIL import Image
 
+sys.argv += ["data/mobilenet_v2_1.0_224_quant.tflite", "data/impala.jpg"]
+
+if len(sys.argv) < 3:
+    print 'Usage: %s [tflite file] [image]' % (sys.argv[0],)
+    exit(0)
 
 mult_by_quant_mult = quantization.quantized_multiplier_mult
 
@@ -86,7 +91,7 @@ def conv2d(options, inputs, weights, bias, output):
         flat_weights.append(ww)
 
     print 'done'
-
+    
     sys.stdout.write('computing conv2d ... ')
     sys.stdout.flush()
 
@@ -244,16 +249,17 @@ def add(options, input1, input2, output):
     in2_S, in2_Z = input2.scale, input2.zero_point
     out_S, out_Z = output.scale, output.zero_point
 
-    n1, qm1 = quantization.compute_multiplier(in1_S)
-    n2, qm2 = quantization.compute_multiplier(in2_S)
+    n1, qm1 = quantization.compute_multiplier(in1_S/out_S)
+    n2, qm2 = quantization.compute_multiplier(in2_S/out_S)
     no, qmo = quantization.compute_multiplier(out_S)
+    
 
     input11 = np.array(input1.data, dtype='int32') - in1_Z
     input22 = np.array(input2.data, dtype='int32') - in2_Z
 
     # shifts input
-    input11 *= two_23
-    input22 *= two_23
+#    input11 *= two_23
+#    input22 *= two_23
 
     # ugh. mult_by_quant_mult is not vectorized.
     output_ = np.zeros(output.shape)
@@ -262,14 +268,18 @@ def add(options, input1, input2, output):
             for j in range(output.shape[2]):
                 in1m = mult_by_quant_mult(input11[0][i][j][c], qm1, n1)
                 in2m = mult_by_quant_mult(input22[0][i][j][c], qm2, n2)
+                
                 v = in1m + in2m
-                out = mult_by_quant_mult(v, qmo, no)
-                out -= out_Z
+#                out = mult_by_quant_mult(v, qmo, no)
+                out = v
+                out += out_Z
                 out = 255 if out > 255 else out
                 out = 0 if out < 0 else out
                 output_[0][i][j][c] = out
 
-    print output_
+#    print input1.data
+#    print input2.data
+#    print output_
     return output_
 
 
@@ -311,12 +321,13 @@ def run(model_path, input_image):
     model.set_input(load_image(input_image, input_shape), reshape=True)
 
     for op in model:
+        print op
         inputs = model.get_named_inputs_for_op(op)
         output = list(model.get_outputs_for_op(op))[0]  # assume single output
 
         opname = op.opname
         if 'CONV_2D' == opname:
-            # output.data = np.random.randint(0,255,size=output.shape)
+            output.data = np.random.randint(0,255,size=output.shape)
             # output.data = np.zeros(output.shape)
             x = conv2d(op,
                        inputs['_'][0],
@@ -325,7 +336,7 @@ def run(model_path, input_image):
                        output)
             output.data = x
         elif 'DEPTHWISE_CONV_2D' == opname:
-            # output.data = np.random.randint(0,255,size=output.shape)
+            output.data = np.random.randint(0,255,size=output.shape)
             # output.data = np.zeros(output.shape)
             x = dwconv2d(op,
                          inputs['_'][0],
@@ -334,12 +345,21 @@ def run(model_path, input_image):
                          output)
             output.data = x
         elif 'ADD' == opname:
-            # output.data = np.random.randint(0,255,size=output.shape)
-            x = add(op,
+#             output.data = np.random.randint(0,255,size=output.shape)
+            
+            input1 = inputs['_'][0]
+            input2 = inputs['_'][1]
+#            input1.data = np.ones(input1.shape, dtype = 'uint8') * 100
+#            input2.data = np.ones(input2.shape, dtype = 'uint8') * 145
+            
+            x = add(op, 
                     inputs['_'][0],
                     inputs['_'][1],
                     output)
             output.data = x
+            print (input1.scale*(input1.data - input1.zero_point) + input2.scale*(input2.data - input2.zero_point))[0][0][0] - output.scale*(output.data - output.zero_point)[0][0][0]
+            
+#            return model
         elif 'AVERAGE_POOL_2D' == opname:
             x = avgpool2d(op,
                           inputs['_'][0],
@@ -353,7 +373,8 @@ def run(model_path, input_image):
             raise NotImplementedError('Unknown opname:', opname)
 
     print np.argmax(model.get_output().data)
+    return model
 
 if __name__ == '__main__':
     assert len(sys.argv) == 3
-    run(sys.argv[1], sys.argv[2])
+    model = run(sys.argv[1], sys.argv[2])
