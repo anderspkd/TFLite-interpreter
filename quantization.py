@@ -8,12 +8,13 @@ int64 = np.int64
 INT32_MIN = int32(1 << 31)
 INT32_MAX = int32(INT32_MIN - 1)
 
+def compute_multiplier_for_conv2d(s1, s2, s3):
+    # given rm = (s1*s2)/s3, compute qm, n, so that rm \approx qm >> n.
+    return compute_multiplier((s1*s2)/s3)
+
 
 # handlers and helpers for quantization stuff
-def compute_multiplier(s1, s2, s3):
-    # given rm = (s1*s2)/s3, compute qm, n, so that rm \approx qm >> n.
-
-    real_multiplier = (s1*s2)/s3
+def compute_multiplier(real_multiplier):
 
     assert 0.0 < real_multiplier < 1.0, \
         'real_multiplier=%s (s1=%s, s2=%s, s3=%s)' % (

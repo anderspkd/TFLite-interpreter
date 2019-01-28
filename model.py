@@ -419,20 +419,38 @@ class TFLiteModel:
         for idx in op.outputs:
             yield self.tensors[idx]
 
+    def get_named_inputs_for_op(self, op):
+        out = {'_': list(), 'bias': list(), 'weights': list()}
+        for idx in op.inputs:
+            tensor = self.tensors[idx]
+            if 'bias' in tensor.name.lower():
+                out['bias'].append(tensor)
+            elif 'weights' in tensor.name.lower():
+                out['weights'].append(tensor)
+            else:
+                out['_'].append(tensor)
+        return out
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
+
 
 if __name__ == '__main__':
     from sys import argv
     if len(argv) < 2:
         print 'Usage: %s [model_path]' % (argv[0],)
         exit(0)
-    model = TFLiteModel(argv[1])
+    model = TFLiteModel(argv[1], reshape_tensors=True)
     for op in model:
         print '---------------------------'
         print op
         print 'Inputs:'
         for idx in op.inputs:
             t = model.tensors[idx]
-            # t.print_data = True
+            t.print_data = True
             print '', t
         print '\nOutputs:'
         for idx in op.outputs:
