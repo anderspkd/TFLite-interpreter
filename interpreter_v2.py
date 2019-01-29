@@ -1,11 +1,9 @@
 import numpy as np
-from model import TFLiteModel
+from model import TFLiteModel, Tensor
 import math
 import quantization
 import sys
 from PIL import Image
-
-sys.argv += ["data/mobilenet_v2_1.0_224_quant.tflite", "data/impala.jpg"]
 
 if len(sys.argv) < 3:
     print 'Usage: %s [tflite file] [image]' % (sys.argv[0],)
@@ -91,7 +89,7 @@ def conv2d(options, inputs, weights, bias, output):
         flat_weights.append(ww)
 
     print 'done'
-    
+
     sys.stdout.write('computing conv2d ... ')
     sys.stdout.flush()
 
@@ -252,7 +250,7 @@ def add(options, input1, input2, output):
     n1, qm1 = quantization.compute_multiplier(in1_S/out_S)
     n2, qm2 = quantization.compute_multiplier(in2_S/out_S)
     no, qmo = quantization.compute_multiplier(out_S)
-    
+
 
     input11 = np.array(input1.data, dtype='int32') - in1_Z
     input22 = np.array(input2.data, dtype='int32') - in2_Z
@@ -268,7 +266,7 @@ def add(options, input1, input2, output):
             for j in range(output.shape[2]):
                 in1m = mult_by_quant_mult(input11[0][i][j][c], qm1, n1)
                 in2m = mult_by_quant_mult(input22[0][i][j][c], qm2, n2)
-                
+
                 v = in1m + in2m
 #                out = mult_by_quant_mult(v, qmo, no)
                 out = v
@@ -346,19 +344,19 @@ def run(model_path, input_image):
             output.data = x
         elif 'ADD' == opname:
 #             output.data = np.random.randint(0,255,size=output.shape)
-            
+
             input1 = inputs['_'][0]
             input2 = inputs['_'][1]
 #            input1.data = np.ones(input1.shape, dtype = 'uint8') * 100
 #            input2.data = np.ones(input2.shape, dtype = 'uint8') * 145
-            
-            x = add(op, 
+
+            x = add(op,
                     inputs['_'][0],
                     inputs['_'][1],
                     output)
             output.data = x
             print (input1.scale*(input1.data - input1.zero_point) + input2.scale*(input2.data - input2.zero_point))[0][0][0] - output.scale*(output.data - output.zero_point)[0][0][0]
-            
+
 #            return model
         elif 'AVERAGE_POOL_2D' == opname:
             x = avgpool2d(op,
@@ -369,6 +367,8 @@ def run(model_path, input_image):
             new_shape = tuple(inputs['_'][0].data)
             # TODO: "bias" contains input for this layer, for some reason
             output.data = inputs['bias'][0].data.flatten()
+        elif 'SPACE_TO_DEPTH' == opname:
+            print output
         else:
             raise NotImplementedError('Unknown opname:', opname)
 
