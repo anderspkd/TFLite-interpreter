@@ -316,9 +316,9 @@ def load_image(image_path, input_shape):
 
 
 def run(model_path, input_image):
-    model = TFLiteModel(model_path, parse_data=True, reshape_tensors=True)
+    model = TFLiteModel(model_path, parse_data=True, use_flat_tensors=False)
     input_shape = model.get_input().shape
-    model.set_input(load_image(input_image, input_shape), reshape=True)
+    model.set_input(load_image(input_image, input_shape))
 
     for op in model:
         print op
