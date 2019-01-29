@@ -124,6 +124,7 @@ def conv2d(options, inputs, weights, bias, output):
 
     print 'done'
 
+    print output_final
     return output_final
 
 
@@ -231,7 +232,7 @@ def dwconv2d(options, inputs, weights, bias, output):
                 output_final[0][i][j][c] = v
 
     print 'done'
-
+    print output_final
     return output_final
 
 two_23 = pow(2, 23)
@@ -305,12 +306,20 @@ def avgpool2d(options, input, output):
 
 
 def load_image(image_path, input_shape):
-    img_shape = input_shape[1:-1]
-    img = Image.open(image_path)
-    img = img.resize(img_shape, Image.ANTIALIAS)
-    data = np.asarray(img, dtype='uint8')
-    data = data.reshape(input_shape)
-    return data
+    from keras.preprocessing.image import load_img
+    from keras.preprocessing.image import img_to_array
+    from keras.applications.imagenet_utils import decode_predictions
+    image = load_img(image_path, target_size=input_shape[1:-1])
+    np_image = img_to_array(image)
+    image_batch = np.expand_dims(np_image, axis=0)
+    return image_batch
+
+    # img_shape = input_shape[1:-1]
+    # img = Image.open(image_path)
+    # img = img.resize(img_shape, Image.ANTIALIAS)
+    # data = np.asarray(img, dtype='uint8')
+    # data = data.reshape(input_shape)
+    # return data
 
 
 def run(model_path, input_image):
@@ -368,11 +377,13 @@ def run(model_path, input_image):
             # TODO: "bias" contains input for this layer, for some reason
             output.data = inputs['bias'][0].data.flatten()
         elif 'SPACE_TO_DEPTH' == opname:
-            print output
+            for i in model.get_inputs_for_op(op):
+                print i
+                print np.argmax(i.data)
         else:
             raise NotImplementedError('Unknown opname:', opname)
 
-    print np.argmax(model.get_output().data)
+    # print np.argmax(model.get_output().data)
     return model
 
 if __name__ == '__main__':
