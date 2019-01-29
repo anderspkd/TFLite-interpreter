@@ -364,8 +364,12 @@ def run(model_path, input_image):
                     inputs['_'][1],
                     output)
             output.data = x
-            print (input1.scale*(input1.data - input1.zero_point) + input2.scale*(input2.data - input2.zero_point))[0][0][0] - output.scale*(output.data - output.zero_point)[0][0][0]
-
+            
+            avg = np.abs(np.mean(input1.scale*(input1.data - input1.zero_point) \
+                                 + input2.scale*(input2.data - input2.zero_point) \
+            - output.scale*(output.data - output.zero_point)))
+            print "Average error: ", avg
+            
 #            return model
         elif 'AVERAGE_POOL_2D' == opname:
             x = avgpool2d(op,

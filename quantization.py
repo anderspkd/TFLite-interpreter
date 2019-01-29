@@ -38,7 +38,7 @@ def compute_multiplier(real_multiplier):
     return -n, int32(qm)
 
 
-def quantized_multiplier_mult(x, multiplier, shift, exact_rounding=False):
+def quantized_multiplier_mult(x, multiplier, shift, exact_rounding=True):
     # returns (x*m)*2^{shift}
 
     lshift, rshift = (shift, 0) if shift > 0 else (0, -shift)
