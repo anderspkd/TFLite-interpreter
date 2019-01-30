@@ -16,11 +16,15 @@ def rounded_mult(v, multiplier):
 
 def dequantize_tensor(tensor):
     S, Z = tensor.scale, tensor.zero_point
-    return (np.array(tensor.data, dtype='float64') - Z) * S
+    return (np.array(tensor.data, dtype='float32') - Z) * S
 
 
 def conv2d_dequant(options, inputs, weights, bias, output):
     # assume input has already been dequantized.
+
+    clamp_output = 'relu6' in output.name.lower()
+
+    print 'clamping output: ', clamp_output
 
     weights = dequantize_tensor(weights)
     bias = dequantize_tensor(bias)
@@ -40,7 +44,7 @@ def conv2d_dequant(options, inputs, weights, bias, output):
     print 'output shape:', output.shape
     print 'weights shape:', weights.shape
 
-    output.data = np.zeros(output.shape, dtype='float64')
+    output.data = np.zeros(output.shape, dtype='float32')
 
     # reference_ops.h version. Assume num_batch == 0
     for out_y in range(output_h):
@@ -61,8 +65,9 @@ def conv2d_dequant(options, inputs, weights, bias, output):
                                 acc += iv * wv
                 acc += bias[out_c]
                 # relu6
-                acc = 0.0 if acc < 0 else acc
-                acc = 6.0 if acc > 6 else acc
+                if clamp_output:
+                    acc = 0.0 if acc < 0 else acc
+                    acc = 6.0 if acc > 6 else acc
                 output.data[0][out_y][out_x][out_c] = acc
 
     return output.data
@@ -70,6 +75,8 @@ def conv2d_dequant(options, inputs, weights, bias, output):
 
 def dwconv2d_dequant(options, inputs, weights, bias, output):
     # assume input has already been dequantized.
+
+    clamp_output = 'relu6' in output.name.lower()
 
     weights = dequantize_tensor(weights)
     bias = dequantize_tensor(bias)
@@ -90,7 +97,7 @@ def dwconv2d_dequant(options, inputs, weights, bias, output):
     print 'output shape:', output.shape
     print 'weights shape:', weights.shape
 
-    output.data = np.zeros(output.shape, dtype='float64')
+    output.data = np.zeros(output.shape, dtype='float32')
 
     for out_y in range(output_h):
         for out_x in range(output_w):
@@ -110,8 +117,9 @@ def dwconv2d_dequant(options, inputs, weights, bias, output):
                                 wv = weights[0][filter_y][filter_x][oc]
                                 acc += (iv * wv)
                     acc += bias[oc]
-                    acc = 0.0 if acc < 0 else acc
-                    acc = 6.0 if acc > 6 else acc
+                    if clamp_output:
+                        acc = 0.0 if acc < 0 else acc
+                        acc = 6.0 if acc > 6 else acc
                     output[0][out_y][out_x][oc] = acc
 
     return output.data
@@ -133,6 +141,12 @@ def conv2d_reference(options, inputs, weights, bias, output):
     weights_S, weights_Z = weights.scale, weights.zero_point
     bias_S, bias_Z = bias.scale, bias.zero_point
     output_S, output_Z = output.scale, output.zero_point
+
+    print 'quantization params:'
+    print 'input: %s, %s' % (inputs_S, inputs_Z)
+    print 'weights: %s, %s' % (weights_S, weights_Z)
+    print 'bias: %s, %s' % (bias_S, bias_Z)
+    print 'output: %s, %s' % (output_S, output_Z)
 
     # other options
     stride_h, stride_w = options.stride
@@ -192,6 +206,12 @@ def dwconv2d_reference(options, inputs, weights, bias, output):
     print 'input shape: ', inputs.shape
     print 'output shape:', output.shape
     print 'weights shape:', weights.shape
+
+    print 'quantization params:'
+    print 'input: %s, %s' % (inputs_S, inputs_Z)
+    print 'weights: %s, %s' % (weights_S, weights_Z)
+    print 'bias: %s, %s' % (bias_S, bias_Z)
+    print 'output: %s, %s' % (output_S, output_Z)
 
     output.data = np.zeros(output.shape)
 
@@ -274,7 +294,7 @@ def conv2d(options, inputs, weights, bias, output):
                         xx = x + a - padding_h
                         yy = y + b - padding_w
                         if (0 <= xx < inputs_h) and (0 <= yy < inputs_w):
-                            z.append(int64(inputs[0][xx][yy][c] - inputs_Z))
+                            z.append(int64(inputs[0][xx][yy][c]))
                         else:
                             z.append(int64(0))
                 Z.append(z)
@@ -293,7 +313,7 @@ def conv2d(options, inputs, weights, bias, output):
             w = list()
             for a in range(weights_h):
                 for b in range(weights_w):
-                    w.append(weights[c][a][b][c_] - weights_Z)
+                    w.append(weights[c][a][b][c_])
             ww.append(np.array(w, dtype='int64'))
         flat_weights.append(ww)
 
@@ -311,14 +331,14 @@ def conv2d(options, inputs, weights, bias, output):
         for c_ in range(n_channels_in):
             W_flat = flat_weights[c][c_]
             I_c = inputs_per_channel[c_]
-            if print_counter <= max_print:
-                print 'I_c:\n----------------------------------'
-                print I_c
-                print '----------------------------------------'
-                print 'W_flat:\n-------------------------------'
-                print W_flat
+            # if print_counter <= max_print:
+            #     print 'I_c:\n----------------------------------'
+            #     print I_c
+            #     print '----------------------------------------'
+            #     print 'W_flat:\n-------------------------------'
+            #     print W_flat
             print_counter += 1
-            r = I_c.dot(W_flat)
+            r = (I_c - inputs_Z).dot(W_flat - weights_Z)
             r = r.reshape(output_shape[:-1])
             output_for_c += r
         output_list.append(output_for_c + bias[c])
@@ -541,7 +561,7 @@ def avgpool2d_dequant(options, input, output):
     stride_h, stride_w = options.stride
     filter_h, filter_w = options.filter_size
 
-    output_ = np.zeros(output.shape)
+    output_ = np.zeros(output.shape, dtype='float32')
 
     # quantization parameters are not used at all here??
     for out_y in range(output_h):
@@ -563,7 +583,7 @@ def avgpool2d_dequant(options, input, output):
                         fc +=1
                 # acc = (float(acc) + fc / 2) / fc
                 acc = float(acc) / fc
-                acc = min(6.0, max(0.0, acc))
+                # acc = min(6.0, max(0.0, acc))
                 output_[0][out_y][out_x][c] = acc
 
     output.data = output_
@@ -595,7 +615,7 @@ def avgpool2d(options, input, output):
     stride_h, stride_w = options.stride
     filter_h, filter_w = options.filter_size
 
-    output_ = np.zeros(output.shape)
+    output_ = np.zeros(output.shape, dtype='uint8')
 
     # quantization parameters are not used at all here??
     for out_y in range(output_h):
@@ -613,10 +633,10 @@ def avgpool2d(options, input, output):
                     for filter_x in range(fxs, fxe):
                         in_x = in_x_origin + filter_x
                         in_y = in_y_origin + filter_y
-                        acc += input[0][in_y][in_x][c] - input.zero_point
+                        acc += input[0][in_y][in_x][c]
                         fc +=1
-                # acc = (float(acc) + fc / 2) / fc
-                acc = float(acc) / fc
+                acc = (float(acc) + fc / 2) / fc
+                # acc = float(acc) / fc
                 acc = min(255, max(0, acc))
                 output_[0][out_y][out_x][c] = acc
 
@@ -656,6 +676,8 @@ def run(model_path, input_image):
     input_shape = model.get_input().shape
     model.set_input(load_image(input_image, input_shape))
 
+    np.set_printoptions(threshold=np.nan)
+
     for op in model:
         print '-------------------------------------'
         print op
@@ -681,7 +703,7 @@ def run(model_path, input_image):
                        inputs['weights'][0],
                        inputs['bias'][0],
                        output)
-            print x
+            print x.flatten()
             output.data = x
         elif 'DEPTHWISE_CONV_2D' == opname:
             # output.data = np.random.randint(0,255,size=output.shape)
@@ -691,7 +713,7 @@ def run(model_path, input_image):
                          inputs['weights'][0],
                          inputs['bias'][0],
                          output)
-            print x
+            print x.flatten()
             output.data = x
         elif 'ADD' == opname:
 #             output.data = np.random.randint(0,255,size=output.shape)
@@ -711,15 +733,18 @@ def run(model_path, input_image):
             x = avgpool2d_dequant(op,
                           inputs['_'][0],
                           output)
+            print x.flatten()
             output.data = x
         elif 'RESIZE_BILINEAR' == opname:
             new_shape = tuple(inputs['_'][0].data)
+            print new_shape
             # TODO: "bias" contains input for this layer, for some reason
             output.data = inputs['bias'][0].data.flatten()
         elif 'SPACE_TO_DEPTH' == opname:
             for i in model.get_inputs_for_op(op):
-                print i
-                print np.argmax(i.data)
+                print 'input:', i
+                print 'top 5:'
+                print [(x, i[x]) for x in i.data.argsort()[-5:][::-1]]
         else:
             raise NotImplementedError('Unknown opname:', opname)
 
