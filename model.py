@@ -259,11 +259,16 @@ class Tensor:
             self._load_data()
 
     def __repr__(self):
-        d = self.data if self.print_data else type(self.data)
-        return '%s: quant=(Z=%s, S=%s), shape=%s (%s), data_type=%s, data=%s' % (
-            self.name, self.zero_point, self.scale, self.shape,
-            self.actual_shape, self.data_type, d
-        )
+        if self.print_data:
+            return '%s: quant=(%s, %s), shape=%s [%s], data_type%s, data:\n\n%s\n\n' % (
+                self.name, self.scale, self.zero_point, self.shape, self.actual_shape,
+                self.data_type, self.data
+            )
+        else:
+            return '%s: quant=(Z=%s, S=%s), shape=%s (%s), data_type=%s' % (
+                self.name, self.zero_point, self.scale, self.shape,
+            self.actual_shape, self.data_type
+            )
 
     def __getitem__(self, idx):
         try:
@@ -458,7 +463,7 @@ if __name__ == '__main__':
     if len(argv) < 2:
         print 'Usage: %s [model_path]' % (argv[0],)
         exit(0)
-    model = TFLiteModel(argv[1], use_flat_tensors=True)
+    model = TFLiteModel(argv[1], use_flat_tensors=False)
     for op in model:
         print '---------------------------'
         print op
