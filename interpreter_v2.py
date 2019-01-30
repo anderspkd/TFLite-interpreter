@@ -4,6 +4,7 @@ import math
 import quantization
 import sys
 from PIL import Image
+import json
 
 if len(sys.argv) < 3:
     print 'Usage: %s [tflite file] [image]' % (sys.argv[0],)
@@ -11,6 +12,10 @@ if len(sys.argv) < 3:
 
 mult_by_quant_mult = quantization.quantized_multiplier_mult
 
+def label_result(result, labels):
+    with open(labels) as f:
+        text = f.read()
+    return json.loads(text)[str(result)]
 
 def conv2d(options, inputs, weights, bias, output):
 
@@ -32,6 +37,25 @@ def conv2d(options, inputs, weights, bias, output):
     stride_h, stride_w = options.stride
     # a bit crude, but this provides the maximum padding we need, since we
     # assume "SAME" padding type.
+    
+    # Formulas from TF website
+    out_height = np.ceil(float(inputs_h) / float(stride_h))
+    out_width  = np.ceil(float(inputs_w) / float(stride_w))
+    
+    if (inputs_h % stride_h == 0):
+        pad_along_height = max(weights_h - stride_h, 0)
+    else:
+        pad_along_height = max(weights_h - (inputs_h % stride_h), 0)
+    if (inputs_w % stride_w == 0):
+        pad_along_width = max(weights_w - stride_w, 0)
+    else:
+        pad_along_width = max(weights_w - (inputs_w % stride_w), 0)
+        
+    pad_top = pad_along_height // 2
+    pad_bottom = pad_along_height - pad_top
+    pad_left = pad_along_width // 2
+    pad_right = pad_along_width - pad_left
+    
     padding_h, padding_w = (weights_h // 2, weights_w // 2)
 
     output_shape = (int(math.ceil(float(inputs_h)/stride_h)),
@@ -42,7 +66,9 @@ def conv2d(options, inputs, weights, bias, output):
 
     print 'input shape: ', inputs.shape
     print 'weights shape: ', weights.shape
-    print 'output shape: ', output_shape
+    print 'output shape: ', output_shape, (out_height, out_width)
+    print 'total padding (h,w): ', pad_along_height, pad_along_width
+    print 'padding t,b,l,r: ', pad_top, pad_bottom, pad_left, pad_right
 
     sys.stdout.write('input prep ... ')
     sys.stdout.flush()
@@ -54,6 +80,8 @@ def conv2d(options, inputs, weights, bias, output):
 
     inputs_per_channel = list()
     for c in range(n_channels_in):
+        # Z holds a list of lists
+        # Each list is the flat version of a window
         Z = list()
         for i in range(output_h):
             for j in range(output_w):
@@ -106,7 +134,7 @@ def conv2d(options, inputs, weights, bias, output):
         output_list.append(output_for_c + bias[c])
 
     print 'done'
-
+#    print output_list
     sys.stdout.write('scaling results ... ')
     sys.stdout.flush()
 
@@ -123,8 +151,8 @@ def conv2d(options, inputs, weights, bias, output):
                 output_final[0][i][j][c] = v
 
     print 'done'
-
-    print output_final
+    print np.array(output_list)
+    print np.moveaxis(output_final, -1, 1)
     return output_final
 
 
@@ -232,7 +260,7 @@ def dwconv2d(options, inputs, weights, bias, output):
                 output_final[0][i][j][c] = v
 
     print 'done'
-    print output_final
+#    print output_final
     return output_final
 
 two_23 = pow(2, 23)
@@ -286,7 +314,12 @@ def avgpool2d(options, input, output):
     _, input_h, input_w, n_channels_in = input.shape
     _, output_h, output_w, n_channels_out = output.shape
 
+    # We make assumptions about this particular layer
+    # Window size = Input size, so there is no stride and the output is 1x1
+    
     n = input_h * input_w
+    print 'input.shape: ', input.shape
+    print 'output.shape: ', output.shape
     print 'divisor: ', n
 
     assert output_h == output_w == 1
@@ -298,10 +331,14 @@ def avgpool2d(options, input, output):
         acc = int32(0)
         for i in range(input_h):
             for j in range(input_w):
-                acc += input[0][i][j][c] - input.zero_point
+                acc += input[0][i][j][c]# - input.zero_point
+#        avg = (acc + n//2) // n
         avg = (float(acc) / n)
-        output_[0][0][0][c] = int(round(avg))
-
+        out = int(round(avg))
+        out = 255 if out > 255 else out
+        out = 0 if out < 0 else out
+        output_[0][0][0][c] = out
+    print output_[0][0][0]
     return output_
 
 
@@ -322,13 +359,13 @@ def load_image(image_path, input_shape):
     # return data
 
 
-def run(model_path, input_image):
+def run(model_path, input_image, labels):
     model = TFLiteModel(model_path, parse_data=True, use_flat_tensors=False)
     input_shape = model.get_input().shape
     model.set_input(load_image(input_image, input_shape))
 
     for op in model:
-        print op
+        print "\n" + 80*"-" + "\n", op
         inputs = model.get_named_inputs_for_op(op)
         output = list(model.get_outputs_for_op(op))[0]  # assume single output
 
@@ -342,6 +379,8 @@ def run(model_path, input_image):
                        inputs['bias'][0],
                        output)
             output.data = x
+#            print output.data
+#            return output.data
         elif 'DEPTHWISE_CONV_2D' == opname:
             output.data = np.random.randint(0,255,size=output.shape)
             # output.data = np.zeros(output.shape)
@@ -384,12 +423,21 @@ def run(model_path, input_image):
             for i in model.get_inputs_for_op(op):
                 print i
                 print np.argmax(i.data)
+                model.get_output().data = i.data
+                
         else:
             raise NotImplementedError('Unknown opname:', opname)
 
-    # print np.argmax(model.get_output().data)
+    result = np.argmax(model.get_output().data) 
+    result = label_result(result, labels)
+    print '%s is a "%s"' % (input_image, result)
     return model
 
+
+
 if __name__ == '__main__':
-    assert len(sys.argv) == 3
-    model = run(sys.argv[1], sys.argv[2])
+    assert len(sys.argv) == 4
+    import warnings
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        model = run(sys.argv[1], sys.argv[2], sys.argv[3])

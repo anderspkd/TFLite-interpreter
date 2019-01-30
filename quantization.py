@@ -38,41 +38,53 @@ def compute_multiplier(real_multiplier):
     return -n, int32(qm)
 
 
-def quantized_multiplier_mult(x, multiplier, shift, exact_rounding=True):
+def quantized_multiplier_mult(x, multiplier, shift, exact_rounding=True, numpy=False):
     # returns (x*m)*2^{shift}
-
+    
+    # For now let's assume that the shift is a right shift
+    assert shift <= 0
+    
     lshift, rshift = (shift, 0) if shift > 0 else (0, -shift)
-    # 1. saturate mult between `x * (1 << lshift)` and `multiplier`
-    x_ = int32(x * (1 << lshift))
-    overflow = (x_ == multiplier and x == INT32_MIN)
-    a = int64(x_)
-    a = a * int64(multiplier)
-    nudge = (1 << 30) if a >= 0 else (1 - (1 << 30))
-    a = int32((a + nudge) / (1 << 31))
-    a = INT32_MAX if overflow else a
-
-    # exact rounding to nearest. This is what gemmlowp implements
-    # exponent = rshift
-    mask = (1l << rshift) - 1
-    remainder = a & mask
-    # MaskIfLessThan(a, 0) & 1
-    bit1 = 1 if a < 0 else 0
-    threshold = (mask >> 1) + bit1
-    # MaskIfGreaterThan(remainder, threshold) & 1
-    bit2 = 1 if remainder > threshold else 0
-
-    # v == round(a / 2^{shift})
-    v = (a >> rshift) + bit2
-
-    if exact_rounding:
-        # in case of exact rounding, we simply return v.
-        return v
-
-    # otherwise, we introduce an error that is identical to the one introduced
-    # by the TruncPR protocol of Caterina et al. Since we're in the clear, we
-    # can cheat a bit and just use FP.
-    y = float(a) / pow(2,rshift)
-    alpha = np.abs(y - v)  # dist. from nearest int
-    if random.random() < alpha:
-        return v
-    return int(y)
+    assert lshift == 0
+    if numpy:
+        num = np.int64(multiplier) * np.int64(x) * (1 << lshift)
+        den = np.int64(1 << (rshift + 31))
+        return round(num / den)
+    else:          
+        # 1. saturate mult between `x * (1 << lshift)` and `multiplier`
+        x_ = int32(x * (1 << lshift))
+        overflow = (x_ == multiplier and x == INT32_MIN)
+        a = int64(x_)
+        a = a * int64(multiplier)
+        nudge = int32(1 << 30) if a >= 0 else int32(1 - (1 << 30))
+        a = int32((a + nudge) / int64(1 << 31))
+        a = INT32_MAX if overflow else a
+        
+        # Just for the fun of it
+        assert overflow != True
+    
+        # exact rounding to nearest. This is what gemmlowp implements
+        # exponent = rshift
+        mask = (1l << rshift) - 1
+        remainder = a & mask
+        # MaskIfLessThan(a, 0) & 1
+        bit1 = 1 if a < 0 else 0
+        threshold = (mask >> 1) + bit1
+        # MaskIfGreaterThan(remainder, threshold) & 1
+        bit2 = 1 if remainder > threshold else 0
+    
+        # v == round(a / 2^{shift})
+        v = (a >> rshift) + bit2
+    
+        if exact_rounding:
+            # in case of exact rounding, we simply return v.
+            return v
+    
+        # otherwise, we introduce an error that is identical to the one introduced
+        # by the TruncPR protocol of Caterina et al. Since we're in the clear, we
+        # can cheat a bit and just use FP.
+        y = float(a) / pow(2,rshift)
+        alpha = np.abs(y - v)  # dist. from nearest int
+        if random.random() < alpha:
+            return v
+        return int(y)
