@@ -144,7 +144,7 @@ def share_model_data(model_data, model_description):
 
 def run(party_id, model_path, image_path=None):
 
-    assert party_id in (1, 2, 3)
+    assert party_id in (0, 1, 2)
 
     # Preprocess the model owners inputs.
     # model owner
