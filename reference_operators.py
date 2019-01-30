@@ -45,7 +45,9 @@ def conv2d(options, inputs, weights, bias, output):
     # assume "SAME" padding type.
     padding_h, padding_w = (weights_h // 2, weights_w // 2)
 
-    multiplier = (inputs_S * weights_S) / output_S
+    # multiplier = (inputs_S * weights_S) / output_S
+    n, qm = quantization.compute_multiplier_for_conv2d(weights_S, inputs_S, output_S)
+    quant_mult = quantization.quantized_multiplier_mult
 
     output.data = np.zeros(output.shape, dtype='uint8')
 
@@ -66,7 +68,8 @@ def conv2d(options, inputs, weights, bias, output):
                                 wv = int32(weights[out_c][filter_y][filter_x][in_c])
                                 acc += (iv - inputs_Z) * (wv - weights_Z)
                 acc += bias[out_c]
-                acc = int32(rounded_mult(acc, multiplier))
+                # acc = int32(rounded_mult(acc, multiplier))
+                acc = quant_mult(acc, qm, n)
                 acc += output_Z
                 acc = 255 if acc > 255 else acc
                 acc = 0   if acc < 0   else acc
@@ -90,7 +93,9 @@ def dwconv2d(options, inputs, weights, bias, output):
     bias_S, bias_Z = bias.scale, bias.zero_point
     output_S, output_Z = output.scale, output.zero_point
 
-    multiplier = (inputs_S * weights_S) / output_S
+    # multiplier = (inputs_S * weights_S) / output_S
+    n, qm = quantization.compute_multiplier_for_conv2d(weights_S, inputs_S, output_S)
+    quant_mult = quantization.quantized_multiplier_mult
 
     stride_h, stride_w = options.stride
     padding_h, padding_w = (weights_h // 2, weights_w // 2)
@@ -125,7 +130,8 @@ def dwconv2d(options, inputs, weights, bias, output):
                                 wv = int32(weights[0][filter_y][filter_x][oc])
                                 acc += (iv - inputs_Z) * (wv - weights_Z)
                     acc += bias[oc]
-                    acc = int32(rounded_mult(acc, multiplier))
+                    # acc = int32(rounded_mult(acc, multiplier))
+                    acc = quant_mult(acc, qm, n)
                     acc += output_Z
                     acc = 0   if acc < 0   else acc
                     acc = 255 if acc > 255 else acc
