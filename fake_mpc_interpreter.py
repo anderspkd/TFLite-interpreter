@@ -25,9 +25,9 @@ def load_model_data(model_path):
     model = TFLiteModel(model_path)
     layers = list()
     for op in model:
+        inputs = model.get_named_inputs_for_op(op)
+        output = list(model.get_outputs_for_op(op))[0]
         if op.opname in ('CONV_2D', 'DEPTHWISE_CONV_2D'):
-            inputs = model.get_named_inputs_for_op(op)
-            output = list(model.get_outputs_for_op(op))[0]
             weights_data = inputs['weights'][0].data - weights.zero_point
             bias_data = inputs['bias'][0].data
             input_tensor = inputs['_'][0]
@@ -49,6 +49,20 @@ def load_model_data(model_path):
                 filter_size=op.filter_size,
                 name=op.opname
             ))
+        elif op.opname == 'ADD':
+            # the values we need here are essentially the same as for a
+            # convolution layer, hence we use the same function :-)
+            shift, multiplier = compute_multiplier_for_conv2d(
+                inputs['_'][0].scale, inputs['_'][1].scale, output.scale
+            )
+            layers.append(Layer(
+                output_offset=output.zero_point,
+                input1_offset=inputs['_'][0].zero_point,
+                input2_offset=inputs['_'][1].zero_point,
+                quant_mult_shift=shift,
+                quant_mult_multiplier=multiplier,
+                name=op.opname
+            ))
     return layers
 
 
@@ -56,9 +70,9 @@ def load_model_description(model_path):
     model = TFLiteModel(model, parse_data=False)
     layers = list()
     for op in model:
+        inputs = model.get_named_inputs_for_op(op)
+        output = list(model.get_outputs_for_op(op))[0]
         if op.opname in ('CONV_2D', 'DEPTHWISE_CONV_2D'):
-            inputs = model.get_named_inputs_for_op(op)
-            output = list(model.get_outputs_for_op(op))[0]
             weights = inputs['weights'][0]
             bias = inputs['bias'][0]
             padding = (weights.shape[1] // 2, weights.shape[2] // 2)
@@ -74,9 +88,19 @@ def load_model_description(model_path):
             ))
         elif op.opname == 'AVERAGE_POOL_2D':
             layers.append(Layer(
+                input_shape=inputs['_'][0].shape,
+                output_shape=output.shape,
                 stride=op.stride,
                 filter_size=op.filter_size,
                 name=op.opname
+            ))
+        elif op.opname == 'ADD':
+            # no options here besides the shape of the inputs and output
+            layers.append(Layer(
+                input1_shape=inputs['_'][0].shape,
+                input2_shape=inputs['_'][1].shape,
+                output_shape=output.shape,
+                name=op.opname,
             ))
     return layers
 
