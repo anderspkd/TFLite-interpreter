@@ -60,12 +60,16 @@ def load_model_description(model_path):
             inputs = model.get_named_inputs_for_op(op)
             output = list(model.get_outputs_for_op(op))[0]
             weights = inputs['weights'][0]
+            bias = inputs['bias'][0]
             padding = (weights.shape[1] // 2, weights.shape[2] // 2)
             input_tensor = inputs['_'][0]
             layers.append(Layer(
+                input_shape=input_tensor.shape,
+                output_shape=output.shape,
+                weights_shape=weights.shape,
+                bias_shape=bias.shape,
                 padding=padding,
                 stride=op.stride,
-                output_shape=output.shape,
                 name=op.opname
             ))
         elif op.opname == 'AVERAGE_POOL_2D':
@@ -155,14 +159,17 @@ def run(party_id, model_path, image_path=None):
 
     # end of preprocessing
 
-    # data owner loads their input here.
-    if party_id == 1:
-        image_data = load_image_data(image_path)
-    else:
-        image_data = None
-
     # all parties load the model description
     model_description = load_model_description(model_path)
+
+    # data owner loads their input here.
+    if party_id == 1:
+        input_shape = model_description[0].input_shape
+        height = input_shape[1]
+        width = input_shape[2]
+        image_data = load_image_data(image_path, height, width)
+    else:
+        image_data = None
 
     # At this point we can start sharing the input for the evaluation. This
     # involves the model owner creating shares of the data in `model_data` and
@@ -220,5 +227,3 @@ if __name__ == '__main__':
     assert len(sys.argv) > 2
     model_path = sys.argv[1]
     image_path = sys.argv[2]
-
-    run(123, model_path, image_path)
