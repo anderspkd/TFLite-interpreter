@@ -140,7 +140,9 @@ class SpaceToDepthOperator(Operator):
         options = self._flatbuf_op.BuiltinOptions()
         o = SpaceToDepthOptions()
         o.Init(options.Bytes, options.Pos)
-        print o.BlockSize()
+        self.block_size = o.BlockSize()
+        self._flatbuf_options_obj = options
+        self._supported_options = ['block_size']
 
 
 class AveragePool2DOperator(Operator):
@@ -286,11 +288,11 @@ class Tensor:
         quantization = self._flatbuf_tensor.Quantization()
         zero_point = quantization.ZeroPointAsNumpy()
         if type(zero_point) == np.ndarray:
-            zero_point = zero_point[0]
+            zero_point = np.int32(zero_point[0])
         self.zero_point = zero_point
         scale = quantization.ScaleAsNumpy()
         if type(scale) == np.ndarray:
-            scale = scale[0]
+            scale = np.float32(scale[0])
         self.scale = scale
 
     def _cast(self, data, new_data_typ):
@@ -470,7 +472,7 @@ if __name__ == '__main__':
         print 'Inputs:'
         for idx in op.inputs:
             t = model.tensors[idx]
-            t.print_data = True
+            # t.print_data = True
             print '', t
         print '\nOutputs:'
         for idx in op.outputs:
@@ -479,4 +481,4 @@ if __name__ == '__main__':
             print '',t
 
         # uncomment to stop before each layer
-        raw_input('...')
+        # raw_input('...')

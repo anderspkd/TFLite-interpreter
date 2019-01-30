@@ -9,9 +9,14 @@ mult_by_quant_mult = quantization.quantized_multiplier_mult
 
 int32 = np.int32
 int64 = np.int64
+uint8 = np.uint8
+
 
 def rounded_mult(v, multiplier):
-    return np.int64(round(multiplier * v))
+    x = int64(v) * multiplier
+    if x < quantization.INT32_MIN or x > quantization.INT32_MAX:
+        return quantization.INT32_MAX
+    return x
 
 
 def dequantize_tensor(tensor):
@@ -156,14 +161,14 @@ def conv2d_reference(options, inputs, weights, bias, output):
 
     multiplier = (inputs_S * weights_S) / output_S
 
-    output.data = np.zeros(output.shape)
+    output.data = np.zeros(output.shape, dtype='uint8')
 
     for out_y in range(output_h):
         for out_x in range(output_w):
             for out_c in range(n_channels_out):
                 in_x_origin = (out_x * stride_w) - padding_w
                 in_y_origin = (out_y * stride_h) - padding_h
-                acc = 0
+                acc = int32(0)
                 for filter_y in range(weights_h):
                     for filter_x in range(weights_w):
                         for in_c in range(n_channels_in):
@@ -171,14 +176,15 @@ def conv2d_reference(options, inputs, weights, bias, output):
                             in_y = in_y_origin + filter_y
                             if (0 <= in_x < inputs_w) and \
                                (0 <= in_y < inputs_h):
-                                iv = inputs[0][in_y][in_x][in_c]
-                                wv = weights[out_c][filter_y][filter_x][in_c]
+                                iv = int32(inputs[0][in_y][in_x][in_c])
+                                wv = int32(weights[out_c][filter_y][filter_x][in_c])
                                 acc += (iv - inputs_Z) * (wv - weights_Z)
                 acc += bias[out_c]
-                acc = int(round(multiplier * acc))
+                acc = int32(rounded_mult(acc, multiplier))
+                acc += output_Z
                 acc = 255 if acc > 255 else acc
                 acc = 0   if acc < 0   else acc
-                output[0][out_y][out_x][out_c] = acc
+                output[0][out_y][out_x][out_c] = uint8(acc)
     return output.data
 
 
@@ -213,7 +219,7 @@ def dwconv2d_reference(options, inputs, weights, bias, output):
     print 'bias: %s, %s' % (bias_S, bias_Z)
     print 'output: %s, %s' % (output_S, output_Z)
 
-    output.data = np.zeros(output.shape)
+    output.data = np.zeros(output.shape, dtype='uint8')
 
     for out_y in range(output_h):
         for out_x in range(output_w):
@@ -222,21 +228,23 @@ def dwconv2d_reference(options, inputs, weights, bias, output):
                     oc = m + in_c * depth_multiplier
                     in_x_origin = (out_x * stride_w) - padding_w
                     in_y_origin = (out_y * stride_h) - padding_h
-                    acc = 0
+                    acc = int32(0)
                     for filter_y in range(weights_h):
                         for filter_x in range(weights_w):
                             in_x = in_x_origin + filter_x
                             in_y = in_y_origin + filter_y
                             if (0 <= in_x < inputs_w) and \
                                (0 <= in_y < inputs_h):
-                                iv = inputs[0][in_y][in_x][in_c]
-                                wv = weights[0][filter_y][filter_x][oc]
+                                iv = int32(inputs[0][in_y][in_x][in_c])
+                                wv = int32(weights[0][filter_y][filter_x][oc])
                                 acc += (iv - inputs_Z) * (wv - weights_Z)
                     acc += bias[oc]
-                    acc = int(round(multiplier * acc))
+                    acc = int32(rounded_mult(acc, multiplier))
+                    acc += output_Z
+                    # acc = int32(round(multiplier * acc))
                     acc = 0   if acc < 0   else acc
                     acc = 255 if acc > 255 else acc
-                    output[0][out_y][out_x][oc] = acc
+                    output[0][out_y][out_x][oc] = uint8(acc)
 
     return output.data
 
@@ -635,10 +643,9 @@ def avgpool2d(options, input, output):
                         in_y = in_y_origin + filter_y
                         acc += input[0][in_y][in_x][c]
                         fc +=1
-                acc = (float(acc) + fc / 2) / fc
-                # acc = float(acc) / fc
+                acc = (acc + fc / 2) / fc
                 acc = min(255, max(0, acc))
-                output_[0][out_y][out_x][c] = acc
+                output_[0][out_y][out_x][c] = uint8(acc)
 
     output.data = output_
     return output_
@@ -691,14 +698,14 @@ def run(model_path, input_image):
 
         # raw_input('---')
 
-        if inputs['_'][0].name == 'input':
-            inputs['_'][0].data = dequantize_tensor(inputs['_'][0])
+        # if inputs['_'][0].name == 'input':
+        #     inputs['_'][0].data = dequantize_tensor(inputs['_'][0])
 
         opname = op.opname
         if 'CONV_2D' == opname:
             # output.data = np.random.randint(0,255,size=output.shape)
             # output.data = np.zeros(output.shape)
-            x = conv2d_dequant(op,
+            x = conv2d_reference(op,
                        inputs['_'][0],
                        inputs['weights'][0],
                        inputs['bias'][0],
@@ -708,7 +715,7 @@ def run(model_path, input_image):
         elif 'DEPTHWISE_CONV_2D' == opname:
             # output.data = np.random.randint(0,255,size=output.shape)
             # output.data = np.zeros(output.shape)
-            x = dwconv2d_dequant(op,
+            x = dwconv2d_reference(op,
                          inputs['_'][0],
                          inputs['weights'][0],
                          inputs['bias'][0],
@@ -728,9 +735,8 @@ def run(model_path, input_image):
                     inputs['_'][1],
                     output)
             output.data = x
-            print (input1.scale*(input1.data - input1.zero_point) + input2.scale*(input2.data - input2.zero_point))[0][0][0] - output.scale*(output.data - output.zero_point)[0][0][0]
         elif 'AVERAGE_POOL_2D' == opname:
-            x = avgpool2d_dequant(op,
+            x = avgpool2d(op,
                           inputs['_'][0],
                           output)
             print x.flatten()
