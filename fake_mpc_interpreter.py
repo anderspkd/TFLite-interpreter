@@ -102,7 +102,7 @@ def conv2d(input_data, input_offset, output_offset, output_shape,
     print 'conv2d:\n\t%s\n\t%s\n\t%s' % (
         input_data.shape, output_shape, weights_data.shape)
 
-    return dummy_output
+    return []
 
 
 # Depthwise Convolution.
@@ -126,7 +126,7 @@ def dwconv2d(input_data, input_offset, output_offset, output_shape,
     print 'dwconv2d:\n\t%s\n\t%s\n\t%s' % (
         input_data.shape, output_shape, weights_data.shape)
 
-    return dummy_output
+    return []
 
 # Average pool
 #
@@ -134,7 +134,7 @@ def dwconv2d(input_data, input_offset, output_offset, output_shape,
 def avgpool2d(input_data, stride, filter_size):
     print 'avgpool2d'
 
-    return dummy_output
+    return []
 
 
 def share_image_data(image_data):
