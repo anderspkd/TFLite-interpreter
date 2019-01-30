@@ -117,6 +117,110 @@ def dwconv2d_dequant(options, inputs, weights, bias, output):
     return output.data
 
 
+def conv2d_reference(options, inputs, weights, bias, output):
+
+    n_channels_out, weights_h, weights_w, n_channels_in = weights.shape
+    _, inputs_h, inputs_w, n_channels_in_ = inputs.shape
+    _, output_h, output_w, n_channels_out_ = output.shape
+
+    assert n_channels_in_ == n_channels_in
+    assert n_channels_out_ == n_channels_out
+
+    assert options.dilation_factor == (1, 1)
+
+    # quantization params
+    inputs_S, inputs_Z = inputs.scale, inputs.zero_point
+    weights_S, weights_Z = weights.scale, weights.zero_point
+    bias_S, bias_Z = bias.scale, bias.zero_point
+    output_S, output_Z = output.scale, output.zero_point
+
+    # other options
+    stride_h, stride_w = options.stride
+    # a bit crude, but this provides the maximum padding we need, since we
+    # assume "SAME" padding type.
+    padding_h, padding_w = (weights_h // 2, weights_w // 2)
+
+    multiplier = (inputs_S * weights_S) / output_S
+
+    output.data = np.zeros(output.shape)
+
+    for out_y in range(output_h):
+        for out_x in range(output_w):
+            for out_c in range(n_channels_out):
+                in_x_origin = (out_x * stride_w) - padding_w
+                in_y_origin = (out_y * stride_h) - padding_h
+                acc = 0
+                for filter_y in range(weights_h):
+                    for filter_x in range(weights_w):
+                        for in_c in range(n_channels_in):
+                            in_x = in_x_origin + filter_x
+                            in_y = in_y_origin + filter_y
+                            if (0 <= in_x < inputs_w) and \
+                               (0 <= in_y < inputs_h):
+                                iv = inputs[0][in_y][in_x][in_c]
+                                wv = weights[out_c][filter_y][filter_x][in_c]
+                                acc += (iv - inputs_Z) * (wv - weights_Z)
+                acc += bias[out_c]
+                acc = int(round(multiplier * acc))
+                acc = 255 if acc > 255 else acc
+                acc = 0   if acc < 0   else acc
+                output[0][out_y][out_x][out_c] = acc
+    return output.data
+
+
+def dwconv2d_reference(options, inputs, weights, bias, output):
+    depth_multiplier = options.depth_multiplier
+
+    # from here everything is essentially the same as before
+    _, weights_h, weights_w, output_depth = weights.shape
+    _, inputs_h, inputs_w, n_channels_in = inputs.shape
+    _, output_h, output_w, output_depth_ = output.shape
+
+    assert output_depth_ == output_depth
+    assert options.dilation_factor == (1, 1)
+
+    inputs_S, inputs_Z = inputs.scale, inputs.zero_point
+    weights_S, weights_Z = weights.scale, weights.zero_point
+    bias_S, bias_Z = bias.scale, bias.zero_point
+    output_S, output_Z = output.scale, output.zero_point
+
+    multiplier = (inputs_S * weights_S) / output_S
+
+    stride_h, stride_w = options.stride
+    padding_h, padding_w = (weights_h // 2, weights_w // 2)
+
+    print 'input shape: ', inputs.shape
+    print 'output shape:', output.shape
+    print 'weights shape:', weights.shape
+
+    output.data = np.zeros(output.shape)
+
+    for out_y in range(output_h):
+        for out_x in range(output_w):
+            for in_c in range(n_channels_in):
+                for m in range(depth_multiplier):
+                    oc = m + in_c * depth_multiplier
+                    in_x_origin = (out_x * stride_w) - padding_w
+                    in_y_origin = (out_y * stride_h) - padding_h
+                    acc = 0
+                    for filter_y in range(weights_h):
+                        for filter_x in range(weights_w):
+                            in_x = in_x_origin + filter_x
+                            in_y = in_y_origin + filter_y
+                            if (0 <= in_x < inputs_w) and \
+                               (0 <= in_y < inputs_h):
+                                iv = inputs[0][in_y][in_x][in_c]
+                                wv = weights[0][filter_y][filter_x][oc]
+                                acc += (iv - inputs_Z) * (wv - weights_Z)
+                    acc += bias[oc]
+                    acc = int(round(multiplier * acc))
+                    acc = 0   if acc < 0   else acc
+                    acc = 255 if acc > 255 else acc
+                    output[0][out_y][out_x][oc] = acc
+
+    return output.data
+
+
 def conv2d(options, inputs, weights, bias, output):
 
     # assume number of batches == 1
@@ -422,6 +526,60 @@ def add(options, input1, input2, output):
     return output_
 
 
+def avgpool2d_dequant(options, input, output):
+    _, input_h, input_w, n_channels_in = input.shape
+    _, output_h, output_w, n_channels_out = output.shape
+
+    n = input_h * input_w
+    print 'divisor: ', n
+
+    assert options.padding == 'VALID'
+    assert output_h == output_w == 1
+    assert n_channels_in == n_channels_out
+
+    padding_h, padding_w = (0, 0)
+    stride_h, stride_w = options.stride
+    filter_h, filter_w = options.filter_size
+
+    output_ = np.zeros(output.shape)
+
+    # quantization parameters are not used at all here??
+    for out_y in range(output_h):
+        for out_x in range(output_w):
+            for c in range(n_channels_in):
+                in_x_origin = (out_x * stride_w) - padding_w
+                in_y_origin = (out_y * stride_h) - padding_h
+                fxs = max(0, -in_x_origin)
+                fxe = min(filter_w, input_w - in_x_origin)
+                fys = max(0, -in_y_origin)
+                fye = min(filter_h, input_h - in_y_origin)
+                acc = 0.0
+                fc = 0
+                for filter_y in range(fys, fye):
+                    for filter_x in range(fxs, fxe):
+                        in_x = in_x_origin + filter_x
+                        in_y = in_y_origin + filter_y
+                        acc += input[0][in_y][in_x][c]
+                        fc +=1
+                # acc = (float(acc) + fc / 2) / fc
+                acc = float(acc) / fc
+                acc = min(6.0, max(0.0, acc))
+                output_[0][out_y][out_x][c] = acc
+
+    output.data = output_
+    return output_
+
+    # for c in range(n_channels_out):
+    #     acc = np.int64(0)
+    #     for i in range(input_h):
+    #         for j in range(input_w):
+    #             acc += int64(input[0][i][j][c] - input.zero_point)
+    #     avg = (float(acc) / n)
+    #     output_[0][0][0][c] = int(round(avg))
+
+    # return output_
+
+
 def avgpool2d(options, input, output):
     _, input_h, input_w, n_channels_in = input.shape
     _, output_h, output_w, n_channels_out = output.shape
@@ -437,8 +595,9 @@ def avgpool2d(options, input, output):
     stride_h, stride_w = options.stride
     filter_h, filter_w = options.filter_size
 
-    output_ = np.zeros(output.shape, dtype='float64')
+    output_ = np.zeros(output.shape)
 
+    # quantization parameters are not used at all here??
     for out_y in range(output_h):
         for out_x in range(output_w):
             for c in range(n_channels_in):
@@ -448,16 +607,18 @@ def avgpool2d(options, input, output):
                 fxe = min(filter_w, input_w - in_x_origin)
                 fys = max(0, -in_y_origin)
                 fye = min(filter_h, input_h - in_y_origin)
-                total = 0.0
+                acc = 0
                 fc = 0
                 for filter_y in range(fys, fye):
                     for filter_x in range(fxs, fxe):
                         in_x = in_x_origin + filter_x
                         in_y = in_y_origin + filter_y
-                        total += input[0][in_y][in_x][c]
+                        acc += input[0][in_y][in_x][c] - input.zero_point
                         fc +=1
-                avg = total / fc
-                output_[0][out_y][out_x][c] = avg
+                # acc = (float(acc) + fc / 2) / fc
+                acc = float(acc) / fc
+                acc = min(255, max(0, acc))
+                output_[0][out_y][out_x][c] = acc
 
     output.data = output_
     return output_
@@ -547,7 +708,7 @@ def run(model_path, input_image):
             output.data = x
             print (input1.scale*(input1.data - input1.zero_point) + input2.scale*(input2.data - input2.zero_point))[0][0][0] - output.scale*(output.data - output.zero_point)[0][0][0]
         elif 'AVERAGE_POOL_2D' == opname:
-            x = avgpool2d(op,
+            x = avgpool2d_dequant(op,
                           inputs['_'][0],
                           output)
             output.data = x
