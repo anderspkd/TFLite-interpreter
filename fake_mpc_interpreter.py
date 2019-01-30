@@ -1,22 +1,12 @@
 import numpy as np
-from model import Tensor, TFLiteModel
+from model import TFLiteModel
 from quantization import compute_multiplier_for_conv2d
 from PIL import Image
 
-dummy_output = np.zeros((1,1))
 
-# this is called by the guy with the picture. Returns a tensor of the image that
-# can be shared.
-#
-# `height` and `width` is part of some public knowledge of the model (we need to
-# know the size of our input). The final data is a tensor of shape
-#
-#   (1, height, width, 3)
-#
-# i.e., we assume that we're dealing with a RGB image. Strictly speaking, the
-# number of channels is also part of the model. As is the number of batches (the
-# 1 in the beginning).
-def preprocess_data_owner(image_path, height, width):
+# load an image from `image_path` and reshape it so it can be used as input to a
+# NN.
+def load_image_data(image_path, height, width):
     img = Image.open(image_path)
     img = img.resize((height, width), Image.ANTIALIAS)
     data = np.asarray(img, dtype='uint8')
@@ -24,55 +14,68 @@ def preprocess_data_owner(image_path, height, width):
     return data
 
 
-# called by the model owner
-def preprocess_model_owner(model_path):
+# Container class describing a network layer.
+class Layer(object):
+    def __init__(self, **kwargs):
+        for k in kwargs:
+            setattr(self, k, kwargs[k])
+
+
+def load_model_data(model_path):
     model = TFLiteModel(model_path)
-
-    class Operator(object):
-        def __init__(self, **kwargs):
-            for k in kwargs:
-                setattr(self, k, kwargs[k])
-
-    ops = list()
+    layers = list()
     for op in model:
         if op.opname in ('CONV_2D', 'DEPTHWISE_CONV_2D'):
             inputs = model.get_named_inputs_for_op(op)
             output = list(model.get_outputs_for_op(op))[0]
-            # get data for the weights and add the offset.
-            weights = inputs['weights'][0]
-            weights_offset = weights.zero_point
-            weights_data = weights.data - weights_offset
-            # bias
+            weights_data = inputs['weights'][0].data - weights.zero_point
             bias_data = inputs['bias'][0].data
-            # calculate padding
-            padding = (weights.shape[1] // 2, weights.shape[2] // 2)
-            # calculate quantized multiplier
             input_tensor = inputs['_'][0]
             shift, multiplier = compute_multiplier_for_conv2d(
                 weights.scale, input_tensor.scale, output.scale
             )
-            operator = Operator(
+            layers.append(Layer(
                 weights=weights_data,
                 bias=bias_data,
-                padding=padding,
-                stride=op.stride,
                 input_offset=input_tensor.zero_point,
-                # weights_offset=weights.zero_point,
                 output_offset=output.zero_point,
-                output_shape=output.shape,
                 quant_mult_shift=shift,
                 quant_mult_multiplier=multiplier,
                 name=op.opname
-            )
-            ops.append(operator)
-
+            ))
         elif op.opname == 'AVERAGE_POOL_2D':
-            operator = Operator(
+            layers.append(Layer(
                 stride=op.stride,
-                filter_size=op.filter_size
-            )
+                filter_size=op.filter_size,
+                name=op.opname
+            ))
+    return layers
 
-    return ops
+
+def load_model_description(model_path):
+    model = TFLiteModel(model, parse_data=False)
+    layers = list()
+    for op in model:
+        if op.opname in ('CONV_2D', 'DEPTHWISE_CONV_2D'):
+            inputs = model.get_named_inputs_for_op(op)
+            output = list(model.get_outputs_for_op(op))[0]
+            weights = inputs['weights'][0]
+            padding = (weights.shape[1] // 2, weights.shape[2] // 2)
+            input_tensor = inputs['_'][0]
+            layers.append(Layer(
+                padding=padding,
+                stride=op.stride,
+                output_shape=output.shape,
+                name=op.opname
+            ))
+        elif op.opname == 'AVERAGE_POOL_2D':
+            layers.append(Layer(
+                stride=op.stride,
+                filter_size=op.filter_size,
+                name=op.opname
+            ))
+    return layers
+
 
 
 # Convolution.
@@ -130,11 +133,50 @@ def avgpool2d(input_data, stride, filter_size):
     return dummy_output
 
 
-# Intuition: Each of the two parties call their respective pre-process
-# function. The inputs to this function is the output of each of these, after
-# they've been shared.
-def run(image_data, model_data):
-    input_data = image_data
+def share_image_data(image_data):
+    return image_data
+
+
+def share_model_data(model_data, model_description):
+    # if model_data == None, we receive shares. Otherwise we send them.
+    return model_data
+
+
+def run(party_id, model_path, image_path=None):
+
+    assert party_id in (1, 2, 3)
+
+    # Preprocess the model owners inputs.
+    # model owner
+    if party_id == 0:
+        model_data = load_model_data(model_path)
+    else:
+        model_data = None
+
+    # end of preprocessing
+
+    # data owner loads their input here.
+    if party_id == 1:
+        image_data = load_image_data(image_path)
+    else:
+        image_data = None
+
+    # all parties load the model description
+    model_description = load_model_description(model_path)
+
+    # At this point we can start sharing the input for the evaluation. This
+    # involves the model owner creating shares of the data in `model_data` and
+    # the data owner sharing `image_data`.
+    #
+    # We cheat here and simply give all data to everyone.
+    input_data = share_image_data(image_data)
+    model = share_model_data(model_data, model_description)
+
+    # runs the evaluation loop
+    evaluate_model(model, input_data)
+
+
+def evaluate_model(model, input_data):
     for op in model_data:
         if op.name == 'CONV_2D':
             input_data = conv2d(
@@ -179,8 +221,4 @@ if __name__ == '__main__':
     model_path = sys.argv[1]
     image_path = sys.argv[2]
 
-    model_data = preprocess_model_owner(model_path)
-    # the 128 is specific to the smaller v1 models
-    image_data = preprocess_data_owner(image_path, 128, 128)
-
-    run(image_data, model_data)
+    run(123, model_path, image_path)
