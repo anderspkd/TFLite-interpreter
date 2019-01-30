@@ -28,7 +28,8 @@ def load_model_data(model_path):
         inputs = model.get_named_inputs_for_op(op)
         output = list(model.get_outputs_for_op(op))[0]
         if op.opname in ('CONV_2D', 'DEPTHWISE_CONV_2D'):
-            weights_data = inputs['weights'][0].data - weights.zero_point
+            weights = inputs['weights'][0]
+            weights_data = weights.data - weights.zero_point
             bias_data = inputs['bias'][0].data
             input_tensor = inputs['_'][0]
             shift, multiplier = compute_multiplier_for_conv2d(
@@ -50,24 +51,36 @@ def load_model_data(model_path):
                 name=op.opname
             ))
         elif op.opname == 'ADD':
-            # the values we need here are essentially the same as for a
-            # convolution layer, hence we use the same function :-)
-            shift, multiplier = compute_multiplier_for_conv2d(
-                inputs['_'][0].scale, inputs['_'][1].scale, output.scale
+            # the ADD operator computes
+            #
+            #   output_scale * (q3 - output_offset) =
+            #        input1_scale * (q1 - input1_offset) +
+            #        input2_scale * (q2 - input2_offset)
+            #
+            # I.e., a pointwise addition of quantized values, that have
+            # different parameters. To support this, we need to rescale stuff,
+            # which can be done in a similar way as with the convolution above.
+            shift1, multiplier1 = compute_multiplier_for_conv2d(
+                inputs['_'][0].scale, 1.0, output.scale
+            )
+            shift2, multiplier2 = compute_multiplier_for_conv2d(
+                inputs['_'][1].scale, 1.0, output.scale
             )
             layers.append(Layer(
                 output_offset=output.zero_point,
                 input1_offset=inputs['_'][0].zero_point,
                 input2_offset=inputs['_'][1].zero_point,
-                quant_mult_shift=shift,
-                quant_mult_multiplier=multiplier,
+                quant_mult_shift1=shift1,
+                quant_mult_multiplier1=multiplier1,
+                quant_mult_shift2=shift2,
+                quant_mult_multiplier2=multiplier2,
                 name=op.opname
             ))
     return layers
 
 
 def load_model_description(model_path):
-    model = TFLiteModel(model, parse_data=False)
+    model = TFLiteModel(model_path, parse_data=False)
     layers = list()
     for op in model:
         inputs = model.get_named_inputs_for_op(op)
@@ -172,7 +185,7 @@ def share_model_data(model_data, model_description):
 
 def run(party_id, model_path, image_path=None):
 
-    assert party_id in (0, 1, 2)
+    assert party_id in (0, 1, 2), 'unexpected party_id: %s' % (party_id, )
 
     # Preprocess the model owners inputs.
     # model owner
@@ -208,7 +221,7 @@ def run(party_id, model_path, image_path=None):
 
 
 def evaluate_model(model, input_data):
-    for op in model_data:
+    for op in model:
         if op.name == 'CONV_2D':
             input_data = conv2d(
                 input_data,
@@ -248,6 +261,8 @@ def evaluate_model(model, input_data):
 
 if __name__ == '__main__':
     import sys
-    assert len(sys.argv) > 2
-    model_path = sys.argv[1]
-    image_path = sys.argv[2]
+    assert len(sys.argv) > 3
+    party_id = int(sys.argv[1])
+    model_path = sys.argv[2]
+    image_path = sys.argv[3]
+    run(party_id, model_path, image_path)
