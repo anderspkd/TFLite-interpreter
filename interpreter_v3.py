@@ -4,7 +4,7 @@ from model import TFLiteModel
 import numpy as np
 
 def pprint_op(op):
-    print '-------------------------'
+    print 80*'-'
     print op
 
 
