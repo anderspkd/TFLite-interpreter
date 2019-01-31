@@ -2,11 +2,16 @@
 
 from model import TFLiteModel
 import numpy as np
+import json
 
 def pprint_op(op):
-    print '-------------------------'
+    print 80*'-'
     print op
-
+    
+def label_result(result, labels):
+    with open(labels) as f:
+        text = f.read()
+    return json.loads(text)[str(result)]
 
 def load_image_data(image_path, input_shape, use_keras=False):
     if use_keras:
@@ -25,7 +30,7 @@ def load_image_data(image_path, input_shape, use_keras=False):
     return data
 
 
-def run(image_path, model_path, variant):
+def run(image_path, model_path, label_path, variant):
     print 'running %s on %s using variant=%s' % (
         model_path, image_path, variant)
 
@@ -90,9 +95,15 @@ def run(image_path, model_path, variant):
             for i in model.get_inputs_for_op(op):
                 print 'input: ', i
                 print 'top 5:'
-                print [(x, i[x]) for x in i.data.argsort()[-5:][::-1]]
+                top5 = [(x, i[x]) for x in i.data.argsort()[-5:][::-1]]
+                print top5
         else:
             raise NotImplementedError('unknown operator:', opname)
+        
+    result = top5[0][0]
+    result = label_result(result, label_path)
+    print '\n%s is a "%s"' % (image_path, result)
+    return model
 
 
 if __name__ == '__main__':
@@ -104,7 +115,8 @@ variant. Can be "reference", "dequantized". Default is "reference"''',
                         default="reference")
     parser.add_argument('model', help='model to use')
     parser.add_argument('image', help='image to classify')
+    parser.add_argument('labels', help='labels correponding to the outputs')    
 
     args = parser.parse_args()
 
-    run(args.image, args.model, args.variant)
+    model = run(args.image, args.model, args.labels, args.variant)

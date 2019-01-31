@@ -3,9 +3,17 @@ from model import TFLiteModel
 from quantization import compute_multiplier_for_conv2d
 from PIL import Image
 
+# PARTIES
+# P0: Data owner
+# P1: Model owner
+# P2: Extra party
 
-# load an image from `image_path` and reshape it so it can be used as input to a
-# NN.
+##############################################################################
+######################## LOCAL PREPROCESSING #################################
+##############################################################################
+
+# load an image from 'image_path' and reshape it so it can be used as input to a
+# NN. This would be called by P0 locally in order to load its data
 def load_image_data(image_path, height, width):
     img = Image.open(image_path)
     img = img.resize((height, width), Image.ANTIALIAS)
@@ -14,13 +22,17 @@ def load_image_data(image_path, height, width):
     return data
 
 
-# Container class describing a network layer.
+# Container class describing a network layer. This includes the parameters of 
+# the operation, and placeholders for inputs and output.
 class Layer(object):
     def __init__(self, **kwargs):
         for k in kwargs:
             setattr(self, k, kwargs[k])
 
 
+# Load the model from 'model_path', and returns a list of layers with the weights
+# and biases loaded in the appropriate placeholders. This is called by P1 to 
+# load and parse the model.            
 def load_model_data(model_path):
     model = TFLiteModel(model_path)
     layers = list()
@@ -78,7 +90,10 @@ def load_model_data(model_path):
             ))
     return layers
 
-
+# Load the model without setting any value for the placeholders. This is called
+# by all the parties so that they can fill in the placeholders with the weights
+# and biases which will be shared by P1 later on, and with the input that P0
+# will share as well.
 def load_model_description(model_path):
     model = TFLiteModel(model_path, parse_data=False)
     layers = list()
@@ -117,8 +132,22 @@ def load_model_description(model_path):
             ))
     return layers
 
+# At this point the parties are ready for input distribution. P0 shares the
+# parsed input and P1 shares the parsed model. The parties allocate these 
+# shares appropriately.    
+    
+def share_image_data(image_data):
+    return image_data
 
 
+def share_model_data(model_data, model_description):
+    # if model_data == None, we receive shares. Otherwise we send them.
+    return model_data
+
+#############################################################################
+############################## OPERATIONS ################################### 
+#############################################################################
+    
 # Convolution.
 #
 # Secret shared parameters:
@@ -173,52 +202,13 @@ def avgpool2d(input_data, stride, filter_size):
 
     return []
 
+##############################################################################
+########################### MODEL EVALUATION #################################
+##############################################################################
 
-def share_image_data(image_data):
-    return image_data
-
-
-def share_model_data(model_data, model_description):
-    # if model_data == None, we receive shares. Otherwise we send them.
-    return model_data
-
-
-def run(party_id, model_path, image_path=None):
-
-    assert party_id in (0, 1, 2), 'unexpected party_id: %s' % (party_id, )
-
-    # Preprocess the model owners inputs.
-    # model owner
-    if party_id == 0:
-        model_data = load_model_data(model_path)
-    else:
-        model_data = None
-
-    # end of preprocessing
-
-    # all parties load the model description
-    model_description = load_model_description(model_path)
-
-    # data owner loads their input here.
-    if party_id == 1:
-        input_shape = model_description[0].input_shape
-        height = input_shape[1]
-        width = input_shape[2]
-        image_data = load_image_data(image_path, height, width)
-    else:
-        image_data = None
-
-    # At this point we can start sharing the input for the evaluation. This
-    # involves the model owner creating shares of the data in `model_data` and
-    # the data owner sharing `image_data`.
-    #
-    # We cheat here and simply give all data to everyone.
-    input_data = share_image_data(image_data)
-    model = share_model_data(model_data, model_description)
-
-    # runs the evaluation loop
-    evaluate_model(model, input_data)
-
+# With the inputs and model shared and the operations implemented, the parties
+# proceed to the execution of the inference. This is essentially a loop that 
+# goes through each layer and executes the corresponding operation.
 
 def evaluate_model(model, input_data):
     for op in model:
@@ -257,6 +247,48 @@ def evaluate_model(model, input_data):
 
     # this is revealed towards the data owner.
     return input_data
+
+##############################################################################
+############################### OVERVIEW #####################################
+##############################################################################
+    
+# Overall, the execution would look like this.
+def run(party_id, model_path, image_path=None):
+
+    assert party_id in (0, 1, 2), 'unexpected party_id: %s' % (party_id, )
+
+    # Preprocess the model owners inputs.
+    # model owner
+    if party_id == 0:
+        model_data = load_model_data(model_path)
+    else:
+        model_data = None
+
+    # end of preprocessing
+
+    # all parties load the model description
+    model_description = load_model_description(model_path)
+
+    # data owner loads their input here.
+    if party_id == 1:
+        input_shape = model_description[0].input_shape
+        height = input_shape[1]
+        width = input_shape[2]
+        image_data = load_image_data(image_path, height, width)
+    else:
+        image_data = None
+
+    # At this point we can start sharing the input for the evaluation. This
+    # involves the model owner creating shares of the data in `model_data` and
+    # the data owner sharing `image_data`.
+    #
+    # We cheat here and simply give all data to everyone.
+    input_data = share_image_data(image_data)
+    model = share_model_data(model_data, model_description)
+
+    # runs the evaluation loop
+    evaluate_model(model, input_data)
+
 
 
 if __name__ == '__main__':
