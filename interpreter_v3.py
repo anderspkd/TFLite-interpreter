@@ -47,6 +47,11 @@ def run(image_path, model_path, variant):
         avgpool2d = dequantized_operators.avgpool2d
         # dequantize input_data
         model.get_input().data = dequantized_operators.dequantize_tensor(model.get_input())
+    elif variant == 'sop':
+        import sop_operators
+        conv2d = sop_operators.conv2d
+        dwconv2d = sop_operators.dwconv2d
+        avgpool2d = sop_operators.avgpool2d
     else:
         raise ValueError('unknown variant:', variant)
 
