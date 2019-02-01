@@ -24,7 +24,8 @@ def offset_with_size(dim0, dim1, dim2):
 
 
 def _flatten_weights(weights, shape):
-    # helper function for conv2d and dwconv2d
+    # helper function for conv2d and dwconv2d. Flattens the weights tensor along
+    # rows for each output channel.
     oc, wh, ww, ic = shape
     data = np.zeros((oc, ic * wh * ww), dtype='int64')
     offset = offset_with_size(ic, wh, ww)
@@ -55,7 +56,8 @@ def _get_window_for_channel(inputs, x, y, size_x, size_y, channel):
 
 
 def _get_full_window(inputs, x, y, size_x, size_y):
-    # as above, except we extract all windows across all input channels
+    # as above, except we extract all windows across all input channels. This is
+    # used in conv2d, whereas the above is used in dwconv2d.
     windows = list()
     for c in range(inputs.shape[3]):
         window = _get_window_for_channel(inputs, x, y, size_x, size_y, c)
@@ -220,6 +222,7 @@ def _avgpool2d(input_data, input_shape, output_shape, stride, filter_size):
                 fxe = min(filter_size[1], input_shape[2] - x)
                 fye = min(filter_size[0], input_shape[1] - y)
                 acc = 0
+                # NB: `div` can be precomputed
                 div = 0
                 for fy in range(0, fye):
                     for fx in range(0, fxe):
@@ -227,6 +230,8 @@ def _avgpool2d(input_data, input_shape, output_shape, stride, filter_size):
                         y_ = y + fy
                         acc += input_data[0][y_][x_][c]
                         div += 1
+                # compute average. The accuracy of the model does not appear to
+                # suffer if this division is changed to an imprecise one.
                 acc = (acc + div / 2) / div
                 acc = min(255, max(0, acc))
                 output_data[0][out_y][out_x][c] = acc
