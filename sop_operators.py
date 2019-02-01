@@ -238,6 +238,23 @@ def _dwconv2d(input_data, input_offset, input_shape, output_offset,
 
     output_h = output_shape[1]
     output_w = output_shape[2]
+    p('extracting windows and filters ....')
+    filters = [_flat_filter_for_channel(weights_data, c) for c in range(input_shape[3])]
+    windows = list()
+    for out_y in range(output_h):
+        ys = list()
+        for out_x in range(output_w):
+            xs = list()
+            for in_c in range(input_shape[3]):
+                x = (out_x * stride[0]) - padding[0]
+                y = (out_y * stride[0]) - padding[1]
+                window = _get_window_for_channel(
+                    input_data, x, y, weights_shape[1], weights_shape[2], in_c
+                )
+                xs.append(window)
+            ys.append(xs)
+        windows.append(ys)
+    p('done ....')
 
     # Compute a depthwise convoltion. A depthwise convolution is very similar to
     # a regular 2D convolution with the only difference being that we do not sum
@@ -247,17 +264,9 @@ def _dwconv2d(input_data, input_offset, input_shape, output_offset,
         for out_x in range(output_w):
             for in_c in range(input_shape[3]):
                 # assume depth multiplier == 1
-                x = (out_x * stride[0]) - padding[0]
-                y = (out_y * stride[0]) - padding[1]
-                # extract weights_shape[1] * weights_shape[2] size vector for
-                # this channel from the input.
-                window = _get_window_for_channel(
-                    input_data, x, y, weights_shape[1], weights_shape[2], in_c)
-                # extract weights_shape[1] * weights_shape[2] vector from
-                # weights.
-                weights = _flat_filter_for_channel(weights_data, in_c)
-                # same deal now as in conv2d
-                z = window.dot(weights)
+                #
+                # Same deal now as in conv2d
+                z = windows[out_y][out_x][in_c].dot(filters[in_c])
                 z += bias_data[in_c]
                 z = qmult(z, multiplier, shift)
                 z += output_offset
