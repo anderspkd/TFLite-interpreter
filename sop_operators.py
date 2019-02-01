@@ -18,7 +18,7 @@ def p(string):
 
 def offset_with_size(dim0, dim1, dim2):
     def f(i0, i1, i2):
-        # offset into a 3D tensor
+        # array offset into a 3D tensor
         return ((dim1 * i0 + i1) * dim2) + i2
     return f
 
@@ -143,6 +143,29 @@ def avgpool2d(options, inputs, output):
     return x
 
 
+def add(options, input1, input2, output):
+    shift1, multiplier1 = quantization.compute_multiplier_for_conv2d(
+        input1.scale, 1.0, output.scale
+    )
+    shift2, multiplier2 = quantization.compute_multiplier_for_conv2d(
+        input2.scale, 1.0, output.scale
+    )
+    p('computing residual ....')
+    x = _add(input1.data,
+             input1.zero_point,
+             shift1,
+             multiplier1,
+             input2.data,
+             input2.zero_point,
+             shift2,
+             multiplier2,
+             output.shape,
+             output.zero_point
+    )
+    print 'done'
+    return x
+
+
 qmult = quantization.quantized_multiplier_mult
 
 def _conv2d(input_data, input_offset, input_shape, output_offset, output_shape,
@@ -150,16 +173,40 @@ def _conv2d(input_data, input_offset, input_shape, output_offset, output_shape,
             multiplier):
     output_w = output_shape[2]
     output_h = output_shape[1]
+
+    # we "preprocess" the windows before we compute the convolution. It makes
+    # the presentation below a bit clearer and it means we don't have to spend
+    # time on extracting each window in each loop. We need a window for each
+    # output coordinate.
+    #
+    # The reason for doing this here rather than in a proper preprocessing step
+    # is because the shape of the output of the previous layer does not match
+    # the layout of these extracted windows (with an exception in the case where
+    # the filters are 1x1, maybe).
+    p('extracting windows ....')
+    windows = list()
+    for out_y in range(output_h):
+        ys = list()
+        for out_x in range(output_w):
+            xs = list()
+            for out_c in range(output_shape[3]):
+                x = (out_x * stride[0]) - padding[0]
+                y = (out_y * stride[1]) - padding[1]
+                window = _get_full_window(input_data - input_offset, x, y,
+                                          weights_shape[1], weights_shape[2])
+                xs.append(window)
+            ys.append(xs)
+        windows.append(ys)
+    p('done ....')
+
+    # Compute the convolution which at this point is nothing more than a lot of
+    # dot-products with a division + clamp at the end.
     output_data = np.zeros(output_shape, dtype='int64')
     for out_y in range(output_h):
         for out_x in range(output_w):
             for out_c in range(output_shape[3]):
-                x = (out_x * stride[0]) - padding[0]
-                y = (out_y * stride[1]) - padding[1]
-                window = _get_full_window(input_data - input_offset, x, y, weights_shape[1],
-                                          weights_shape[2])
-                # compute sum-of-products (dot product)
-                z = window.dot(weights_data[out_c])
+                # sum-of-products
+                z = windows[out_y][out_x][out_c].dot(weights_data[out_c])
                 # add bias
                 z += bias_data[out_c]
                 # divide/truncate
@@ -188,8 +235,13 @@ def _flat_filter_for_channel(weights, channel):
 def _dwconv2d(input_data, input_offset, input_shape, output_offset,
               output_shape, weights_data, weights_shape, bias_data, stride,
               padding, shift, multiplier):
+
     output_h = output_shape[1]
     output_w = output_shape[2]
+
+    # Compute a depthwise convoltion. A depthwise convolution is very similar to
+    # a regular 2D convolution with the only difference being that we do not sum
+    # up the dot-products over the input channels.
     output_data = np.zeros(output_shape, dtype='int64')
     for out_y in range(output_h):
         for out_x in range(output_w):
@@ -197,8 +249,12 @@ def _dwconv2d(input_data, input_offset, input_shape, output_offset,
                 # assume depth multiplier == 1
                 x = (out_x * stride[0]) - padding[0]
                 y = (out_y * stride[0]) - padding[1]
+                # extract weights_shape[1] * weights_shape[2] size vector for
+                # this channel from the input.
                 window = _get_window_for_channel(
                     input_data, x, y, weights_shape[1], weights_shape[2], in_c)
+                # extract weights_shape[1] * weights_shape[2] vector from
+                # weights.
                 weights = _flat_filter_for_channel(weights_data, in_c)
                 # same deal now as in conv2d
                 z = window.dot(weights)
@@ -235,6 +291,25 @@ def _avgpool2d(input_data, input_shape, output_shape, stride, filter_size):
                 acc = (acc + div / 2) / div
                 acc = min(255, max(0, acc))
                 output_data[0][out_y][out_x][c] = acc
+    return output_data
+
+
+def _add(input1_data, input1_offset, input1_shift, input1_multiplier,
+         input2_data, input2_offset, input2_shift, input2_multiplier,
+         output_shape, output_offset):
+    # This operation should be easy to evaluate in parallel as all entries can
+    # be computed independently of eachother.
+    output_data = np.zeros(output_shape, dtype='int64')
+    input1_data = input1_data - input1_offset
+    input2_data = input2_data - input2_offset
+    for out_y in range(output_shape[1]):
+        for out_x in range(output_shape[2]):
+            for out_c in range(output_shape[3]):
+                in1 = qmult(input1_data[0][out_y][out_x][out_c], input1_multiplier, input1_shift)
+                in2 = qmult(input2_data[0][out_y][out_x][out_c], input2_multiplier, input2_shift)
+                out = output_offset + in1 + in2
+                out = min(255, max(0, 255))
+                output_data[0][out_y][out_x][out_c] = out
     return output_data
 
 

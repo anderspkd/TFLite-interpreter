@@ -29,6 +29,9 @@ def load_image_data(image_path, input_shape, use_keras=False):
     data = data.reshape(input_shape)
     return data
 
+def invalid_op(*args, **kwargs):
+    raise NotImplementedError('hey!')
+
 
 def run(image_path, model_path, label_path, variant, print_data=False):
     print 'running %s on %s using variant=%s' % (
@@ -45,6 +48,7 @@ def run(image_path, model_path, label_path, variant, print_data=False):
         conv2d = reference_operators.conv2d
         dwconv2d = reference_operators.dwconv2d
         avgpool2d = reference_operators.avgpool2d
+        add = invalid_op
     elif variant == 'dequantized':
         import dequantized_operators
         conv2d = dequantized_operators.conv2d
@@ -52,11 +56,13 @@ def run(image_path, model_path, label_path, variant, print_data=False):
         avgpool2d = dequantized_operators.avgpool2d
         # dequantize input_data
         model.get_input().data = dequantized_operators.dequantize_tensor(model.get_input())
+        add = invalid_op
     elif variant == 'sop':
         import sop_operators
         conv2d = sop_operators.conv2d
         dwconv2d = sop_operators.dwconv2d
         avgpool2d = sop_operators.avgpool2d
+        add = sop_operators.add
     else:
         raise ValueError('unknown variant:', variant)
 
@@ -85,9 +91,15 @@ def run(image_path, model_path, label_path, variant, print_data=False):
                 print x
             output.data = x
         elif 'AVERAGE_POOL_2D' == opname:
+            x = np.random.randint(0, 255, dtype='int32', size=output.shape)
             x = avgpool2d(op,
                           inputs['_'][0],
                           output)
+            if print_data:
+                print x
+            output.data = x
+        elif 'ADD' == opname:
+            x = add(op, inputs['_'][0], inputs['_'][1], output)
             if print_data:
                 print x
             output.data = x
@@ -95,6 +107,16 @@ def run(image_path, model_path, label_path, variant, print_data=False):
             # TODO: fix this shitty hack
             new_shape = tuple(inputs['_'][0].data)
             output.data = inputs['bias'][0].data.flatten()
+            np.set_printoptions(threshold=np.nan)
+            for i in model.get_outputs_for_op(op):
+                print 'input: ', i
+                print 'top 5:'
+                top5 = [(x, i[x]) for x in i.data.argsort()[-5:][::-1]]
+                print top5
+            result = top5[0][0]
+            result = label_result(result, label_path)
+            print '\n%s is a "%s"' % (image_path, result)
+            print output.data
         elif 'SPACE_TO_DEPTH' == opname:
             # TODO: we assume a mobileNet v1 model is used. So we print the
             # result here.
@@ -103,12 +125,15 @@ def run(image_path, model_path, label_path, variant, print_data=False):
                 print 'top 5:'
                 top5 = [(x, i[x]) for x in i.data.argsort()[-5:][::-1]]
                 print top5
+            result = top5[0][0]
+            result = label_result(result, label_path)
+            print '\n%s is a "%s"' % (image_path, result)
         else:
             raise NotImplementedError('unknown operator:', opname)
 
-    result = top5[0][0]
-    result = label_result(result, label_path)
-    print '\n%s is a "%s"' % (image_path, result)
+    # result = top5[0][0]
+    # result = label_result(result, label_path)
+    # print '\n%s is a "%s"' % (image_path, result)
     return model
 
 
