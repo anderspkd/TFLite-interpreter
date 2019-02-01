@@ -7,7 +7,7 @@ import json
 def pprint_op(op):
     print 80*'-'
     print op
-    
+
 def label_result(result, labels):
     with open(labels) as f:
         text = f.read()
@@ -30,7 +30,7 @@ def load_image_data(image_path, input_shape, use_keras=False):
     return data
 
 
-def run(image_path, model_path, label_path, variant):
+def run(image_path, model_path, label_path, variant, print_data=False):
     print 'running %s on %s using variant=%s' % (
         model_path, image_path, variant)
 
@@ -72,6 +72,8 @@ def run(image_path, model_path, label_path, variant):
                    inputs['weights'][0],
                    inputs['bias'][0],
                    output)
+            if print_data:
+                print x
             output.data = x
         elif 'DEPTHWISE_CONV_2D' == opname:
             x = dwconv2d(op,
@@ -79,11 +81,15 @@ def run(image_path, model_path, label_path, variant):
                      inputs['weights'][0],
                      inputs['bias'][0],
                      output)
+            if print_data:
+                print x
             output.data = x
         elif 'AVERAGE_POOL_2D' == opname:
             x = avgpool2d(op,
                           inputs['_'][0],
                           output)
+            if print_data:
+                print x
             output.data = x
         elif 'RESIZE_BILINEAR' == opname:
             # TODO: fix this shitty hack
@@ -99,7 +105,7 @@ def run(image_path, model_path, label_path, variant):
                 print top5
         else:
             raise NotImplementedError('unknown operator:', opname)
-        
+
     result = top5[0][0]
     result = label_result(result, label_path)
     print '\n%s is a "%s"' % (image_path, result)
@@ -113,10 +119,16 @@ if __name__ == '__main__':
                         help='''
 variant. Can be "reference", "dequantized". Default is "reference"''',
                         default="reference")
+    parser.add_argument('--print_data', action='store_const',
+                        help='print intermidiary values', const='True',
+                        default=False)
     parser.add_argument('model', help='model to use')
     parser.add_argument('image', help='image to classify')
-    parser.add_argument('labels', help='labels correponding to the outputs')    
+    parser.add_argument('labels', help='labels correponding to the outputs')
 
     args = parser.parse_args()
 
-    model = run(args.image, args.model, args.labels, args.variant)
+    if args.print_data:
+        np.set_printoptions(threshold=np.nan)
+
+    model = run(args.image, args.model, args.labels, args.variant, args.print_data)
