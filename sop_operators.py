@@ -220,3 +220,28 @@ def _avgpool2d(input_data, input_shape, output_shape, stride, filter_size):
                 fye = min(filter_size[0], input_shape[1] - y)
                 acc = 0
                 div = 1
+
+if __name__ == '__main__':
+    np.set_printoptions(threshold=np.nan)
+    i_shape = (1,128,128,3)
+    w_shape = (8,3,3,3)
+    o_shape = (1,64,64,8)
+    padding_h, padding_w = (w_shape[1] // 2, w_shape[2] // 2)
+    # i = np.random.randint(0, 255, size=i_shape, dtype='int32')
+    i = np.array(np.arange(np.prod(i_shape), dtype='uint8').reshape(i_shape), dtype='int32')
+    # w = np.random.randint(0, 255, size=w_shape, dtype='int32')
+    w = np.array(np.arange(np.prod(w_shape), dtype='uint8').reshape(w_shape), dtype='int32')
+    # b = np.random.randint(-5000, 5000, size=(8,), dtype='int32')
+    b = np.arange(o_shape[3], dtype='int32')
+    w_offset = 157
+    w_scale = 0.008882409892976284
+    i_offset = 128
+    i_scale = 0.0078125
+    b_offset = 0.00006939382728887722
+    b_scale = 0.0
+    o_offset = 0.0
+    o_scale = 0.023528477177023888
+    shift, mult = quantization.compute_multiplier_for_conv2d(i_scale, w_scale, o_scale)
+    w = _flatten_weights(w - w_offset, w_shape)
+    print _conv2d(i, i_offset, i_shape, o_offset, o_shape,
+                  w, w_shape, b, (2, 2), (padding_h, padding_w), shift, mult)

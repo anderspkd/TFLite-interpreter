@@ -181,3 +181,39 @@ def avgpool2d(options, input, output):
 
     output.data = output_
     return output_
+
+
+if __name__ == '__main__':
+    class Container(object):
+        def __init__(self, **kwargs):
+            for k in kwargs:
+                setattr(self, k, kwargs[k])
+        def __getitem__(self, idx):
+            return getattr(self, 'data')[idx]
+        def __setitem__(self, idx, v):
+            getattr(self, 'data')[idx] = v
+    np.set_printoptions(threshold=np.nan)
+    i_shape = (1,128,128,3)
+    w_shape = (8,3,3,3)
+    o_shape = (1,64,64,8)
+    padding_h, padding_w = (w_shape[1] // 2, w_shape[2] // 2)
+    # i = np.random.randint(0, 255, size=i_shape, dtype='int32')
+    i = np.array(np.arange(np.prod(i_shape), dtype='uint8').reshape(i_shape), dtype='int32')
+    # w = np.random.randint(0, 255, size=w_shape, dtype='int32')
+    w = np.array(np.arange(np.prod(w_shape), dtype='uint8').reshape(w_shape), dtype='int32')
+    # b = np.random.randint(-5000, 5000, size=(8,), dtype='int32')
+    b = np.arange(o_shape[3], dtype='int32')
+    w_offset = 157
+    w_scale = 0.008882409892976284
+    i_offset = 128
+    i_scale = 0.0078125
+    b_offset = 0.00006939382728887722
+    b_scale = 0.0
+    o_offset = 0.0
+    o_scale = 0.023528477177023888
+    b = Container(data=b, zero_point=b_offset, scale=b_scale, shape=(o_shape[3],))
+    w = Container(data=w, zero_point=w_offset, scale=w_scale, shape=w_shape)
+    i = Container(data=i, zero_point=i_offset, scale=i_scale, shape=i_shape)
+    o = Container(data=[], zero_point=o_offset, scale=o_scale, shape=o_shape)
+    opts = Container(dilation_factor=(1,1), stride=(2,2))
+    print conv2d(opts, i, w, b, o)
