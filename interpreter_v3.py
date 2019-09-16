@@ -107,7 +107,7 @@ def run(image_path, model_path, label_path, variant, print_data=False):
             # TODO: fix this shitty hack
             new_shape = tuple(inputs['_'][0].data)
             output.data = inputs['bias'][0].data.flatten()
-            np.set_printoptions(threshold=np.nan)
+            # np.set_printoptions(threshold=np.nan)
             for i in model.get_outputs_for_op(op):
                 print 'input: ', i
                 print 'top 5:'
@@ -117,17 +117,24 @@ def run(image_path, model_path, label_path, variant, print_data=False):
             result = label_result(result, label_path)
             print '\n%s is a "%s"' % (image_path, result)
             print output.data
-        elif 'SPACE_TO_DEPTH' == opname:
+        elif 'SPACE_TO_DEPTH' == opname or 'SOFTMAX' == opname:
             # TODO: we assume a mobileNet v1 model is used. So we print the
             # result here.
-            for i in model.get_inputs_for_op(op):
-                print 'input: ', i
-                print 'top 5:'
-                top5 = [(x, i[x]) for x in i.data.argsort()[-5:][::-1]]
-                print top5
-            result = top5[0][0]
+            print inputs
+            print 'top 5:'
+            top5 = inputs['_'][0].data[0].argsort()[-5:][::-1]
+            # for i in model.get_inputs_for_op(op):
+            #     print 'input: ', i
+            #     print 'top 5:'
+            #     top5 = [(x, i[x]) for x in i.data.argsort()[-5:][::-1]]
+            #     print top5
+            print top5
+            result = top5[0]
             result = label_result(result, label_path)
             print '\n%s is a "%s"' % (image_path, result)
+        elif 'RESHAPE' == opname:
+            new_shape = tuple(inputs['_'][0].data)
+            output.data = inputs['bias'][0].data.reshape(new_shape)
         else:
             raise NotImplementedError('unknown operator:', opname)
 

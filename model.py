@@ -202,6 +202,13 @@ class DepthwiseConv2DOperator(Operator):
             'stride', 'padding', 'depth_multiplier', 'dilation_factor',
             'fused_activation_function']
 
+class ReshapeOperator(Operator):
+    def parse_options(self):
+        pass
+
+class SoftmaxOperator(Operator):
+    def parse_options(self):
+        pass
 
 # provides a convenient mapping between operator names and the operator classes.
 operator_map = {
@@ -210,7 +217,9 @@ operator_map = {
     'CONV_2D': Conv2DOperator,
     'DEPTHWISE_CONV_2D': DepthwiseConv2DOperator,
     'RESIZE_BILINEAR': ResizeBilinearOperator,
-    'SPACE_TO_DEPTH': SpaceToDepthOperator
+    'SPACE_TO_DEPTH': SpaceToDepthOperator,
+    'RESHAPE': ReshapeOperator,
+    'SOFTMAX': SoftmaxOperator
 }
 
 
@@ -383,7 +392,8 @@ class TFLiteModel:
         for i in range(num_ops):
             op = self.graph.Operators(i)
             op_cls = operator_map[self.opcodes[op.OpcodeIndex()]]
-            self.operators.append(op_cls(op))
+            if op_cls:
+                self.operators.append(op_cls(op))
 
         # load tensors
         num_tensors = self.graph.TensorsLength()
