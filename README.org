@@ -17,6 +17,45 @@ Tensorflow's interpreter can be used to test the validity of the results:
 
 : $ python tflite_interpreter.py "data/mobilenet_v1_0.25_128_quant.tflite" "data/impala.jpg" "data/imagenet_labels.txt"
 
+** Code structure
+
+   There's three classes:
+
+   - Tensor (defined in ~model.py~) is a thin-ish wrapper around a numpy data
+     array. The idea is to have a array-like object which also keeps track of
+     the quantization parameters for a particular tensor.
+
+   - TFLiteModel (defined in ~model.py~) a wrapper around a ~.tflite~ model
+     file. It's instantiated with a ~.tflite~ model file which it loads and
+     converts into a representation that is easier to work with in Python. After
+     loading a model, this object can be used as a interator. See usage on lines
+     40, 41, 42 and 69 in ~interpreter_v3.py~.
+
+   - Operator (defined in ~model.py~) and anything subclassed from it. Each kind
+     of operator (i.e., layer in the network) gets its own operator. E.g., a 2D
+     convolution is a type of operator. The corresponding operator class is
+     essentially a container for various metadata surrounding the operator. In
+     the case of convolution, this data could be the stride or what kind of
+     padding is used. This object does perform any kind of computation in the
+     network.
+
+
+   There's three versions of the operators needed for the MobileNetsV1 networks
+   implemented: reference, dequantized and sop. Operators are implemented in
+   ~<variant>_operators.py~.
+
+   - reference: This is a more-or-less straight copy of how the various
+     operators are implemented in tensorflow. This means a lot of nested
+     for-loops and thus these are pretty slow when run in python.
+
+   - dequantized: Same as above, except all tensors are dequantized before
+     evaluation (e.g., converted from uint8 back to float32).
+
+   - sop: here the task of manipulatng the input into a matrix like shape and
+     then performing the actual computation, is split. It is slightly faster
+     than the reference implementation described above, mostly because there's
+     fewer nested loops.
+
 ** Usage
 
    The parser requires Google's [[https://google.github.io/flatbuffers/][flatbuffer]] library. Installation
