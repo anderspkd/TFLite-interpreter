@@ -17,6 +17,14 @@ Tensorflow's interpreter can be used to test the validity of the results:
 
 : $ python tflite_interpreter.py "data/mobilenet_v1_0.25_128_quant.tflite" "data/impala.jpg" "data/imagenet_labels.txt"
 
+** requirements
+
+   Requires
+   - Pillow
+   - Keras
+   - numpy
+   - tensorflow
+
 ** Code structure
 
    There's three classes:
