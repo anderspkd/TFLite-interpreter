@@ -159,6 +159,11 @@ class AveragePool2DOperator(Operator):
         self._supported_options = [
             'padding', 'stride', 'filter_size', 'fused_activation_function']
 
+    def output_mpc(self, f, model):
+        assert self.stride == (2, 2)
+        assert self.filter_size == (4, 4)
+        shapes = [model.tensors[idx].shape for idx in self.inputs + self.outputs]
+        print >>f, 'QuantAveragePool2d(%s)' % (', '.join(repr(x) for x in shapes))
 
 class ResizeBilinearOperator(Operator):
     def parse_options(self):
@@ -185,6 +190,9 @@ class Conv2DOperator(Operator):
             'stride', 'padding', 'dilation_factor',
             'fused_activation_function']
 
+    def output_mpc(self, f, model):
+        shapes = [model.tensors[idx].shape for idx in self.inputs + self.outputs]
+        print >>f, 'QuantConv2d(%s, %s)' % (', '.join(repr(x) for x in shapes), self.stride)
 
 class DepthwiseConv2DOperator(Operator):
     def parse_options(self):
@@ -202,13 +210,26 @@ class DepthwiseConv2DOperator(Operator):
             'stride', 'padding', 'depth_multiplier', 'dilation_factor',
             'fused_activation_function']
 
+    def output_mpc(self, f, model):
+        assert self.depth_multiplier == 1
+        shapes = [model.tensors[idx].shape for idx in self.inputs + self.outputs]
+        print >>f, 'QuantDepthwiseConv2d(%s, %s)' % (', '.join(repr(x) for x in shapes), self.stride)
+
 class ReshapeOperator(Operator):
     def parse_options(self):
         pass
 
+    def output_mpc(self, f, model):
+        shapes = [model.tensors[idx].shape for idx in self.inputs + self.outputs]
+        print >>f, 'QuantReshape(%s)' % (', '.join(repr(x) for x in shapes))
+
 class SoftmaxOperator(Operator):
     def parse_options(self):
         pass
+
+    def output_mpc(self, f, model):
+        shapes = [model.tensors[idx].shape for idx in self.inputs + self.outputs]
+        print >>f, 'QuantSoftmax(%s)' % (', '.join(repr(x) for x in shapes))
 
 # provides a convenient mapping between operator names and the operator classes.
 operator_map = {
@@ -469,11 +490,27 @@ class TFLiteModel:
     def __exit__(self, exc_type, exc_val, exc_tb):
         pass
 
+    def output_model(self, f):
+        for op in self:
+            for idx in op.inputs + op.outputs:
+                t = self.tensors[idx]
+                print >>f, t.scale, t.zero_point
+            for idx in op.inputs + op.outputs:
+                t = self.tensors[idx]
+                for x in t.data.flatten():
+                    print >>f, x,
+                print >>f
+
+    def output_mpc(self, f):
+        for op in self:
+            print >>f, 'layers.append(',
+            op.output_mpc(f, self)
+            print >>f, ')'
 
 if __name__ == '__main__':
     from sys import argv
     if len(argv) < 2:
-        print 'Usage: %s [model_path]' % (argv[0],)
+        print 'Usage: %s [model_path] ([model_output mpc_output])' % (argv[0],)
         exit(0)
     model = TFLiteModel(argv[1], use_flat_tensors=False)
     for op in model:
@@ -492,3 +529,8 @@ if __name__ == '__main__':
 
         # uncomment to stop before each layer
         # raw_input('...')
+
+    if (len(argv) > 2):
+        model.output_model(open(argv[2], 'w'))
+    if (len(argv) > 3):
+        model.output_mpc(open(argv[3], 'w'))
