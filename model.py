@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 # Parse a .tflite file into some malleable representation (the classes defined
 # below). Some examples follow:
 #
@@ -42,6 +44,7 @@
 # to go through the entire model in an orderly manner.
 
 
+import re
 import numpy as np
 from tflite.Model import Model
 from tflite.BuiltinOperator import BuiltinOperator
@@ -163,7 +166,7 @@ class AveragePool2DOperator(Operator):
         assert self.stride == (2, 2)
         assert self.filter_size == (4, 4)
         shapes = [model.tensors[idx].shape for idx in self.inputs + self.outputs]
-        print >>f, 'QuantAveragePool2d(%s)' % (', '.join(repr(x) for x in shapes))
+        return 'QuantAveragePool2d(%s)' % (', '.join(repr(x) for x in shapes))
 
 class ResizeBilinearOperator(Operator):
     def parse_options(self):
@@ -192,7 +195,7 @@ class Conv2DOperator(Operator):
 
     def output_mpc(self, f, model):
         shapes = [model.tensors[idx].shape for idx in self.inputs + self.outputs]
-        print >>f, 'QuantConv2d(%s, %s)' % (', '.join(repr(x) for x in shapes), self.stride)
+        return 'QuantConv2d(%s, %s)' % (', '.join(repr(x) for x in shapes), self.stride)
 
 class DepthwiseConv2DOperator(Operator):
     def parse_options(self):
@@ -213,7 +216,7 @@ class DepthwiseConv2DOperator(Operator):
     def output_mpc(self, f, model):
         assert self.depth_multiplier == 1
         shapes = [model.tensors[idx].shape for idx in self.inputs + self.outputs]
-        print >>f, 'QuantDepthwiseConv2d(%s, %s)' % (', '.join(repr(x) for x in shapes), self.stride)
+        return 'QuantDepthwiseConv2d(%s, %s)' % (', '.join(repr(x) for x in shapes), self.stride)
 
 class ReshapeOperator(Operator):
     def parse_options(self):
@@ -221,7 +224,7 @@ class ReshapeOperator(Operator):
 
     def output_mpc(self, f, model):
         shapes = [model.tensors[idx].shape for idx in self.inputs + self.outputs]
-        print >>f, 'QuantReshape(%s)' % (', '.join(repr(x) for x in shapes))
+        return 'QuantReshape(%s)' % (', '.join(repr(x) for x in shapes))
 
 class SoftmaxOperator(Operator):
     def parse_options(self):
@@ -229,7 +232,7 @@ class SoftmaxOperator(Operator):
 
     def output_mpc(self, f, model):
         shapes = [model.tensors[idx].shape for idx in self.inputs + self.outputs]
-        print >>f, 'QuantSoftmax(%s)' % (', '.join(repr(x) for x in shapes))
+        return 'QuantSoftmax(%s)' % (', '.join(repr(x) for x in shapes))
 
 # provides a convenient mapping between operator names and the operator classes.
 operator_map = {
@@ -502,10 +505,11 @@ class TFLiteModel:
                 print >>f
 
     def output_mpc(self, f):
-        for op in self:
-            print >>f, 'layers.append(',
-            op.output_mpc(f, self)
-            print >>f, ')'
+        f.write("if network == '%s':\n" % re.search('.*_(v.*)_quant.*',
+                                                    self.model_path).group(1))
+        f.write('\tlayers = [\n\t\t')
+        f.write(',\n\t\t'.join(op.output_mpc(f, self) for op in self))
+        f.write('\n\t]\n')
 
 if __name__ == '__main__':
     from sys import argv
