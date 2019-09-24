@@ -164,9 +164,10 @@ class AveragePool2DOperator(Operator):
 
     def output_mpc(self, f, model):
         assert self.stride == (2, 2)
-        assert self.filter_size == (4, 4)
+        assert self.padding == 'VALID'
         shapes = [model.tensors[idx].shape for idx in self.inputs + self.outputs]
-        return 'QuantAveragePool2d(%s)' % (', '.join(repr(x) for x in shapes))
+        return 'QuantAveragePool2d(%s, %s)' % \
+            (', '.join(repr(x) for x in shapes), self.filter_size)
 
 class ResizeBilinearOperator(Operator):
     def parse_options(self):
